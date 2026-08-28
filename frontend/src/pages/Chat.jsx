@@ -46,39 +46,72 @@ function Toast({ message, type = 'error', onClose }) {
   );
 }
 
-// ── AI Logic collapsible panel (Label 4) ───────────────────────────────────
+// ── AI Decision panel — safe structured display, no raw prompts/keys ───────
 function AILogicPanel({ data }) {
   const [open, setOpen] = useState(false);
   if (!data) return null;
+
+  const addressLabels = {
+    message:      'From your message',
+    profile:      'Saved address',
+    not_provided: 'Not yet provided',
+  };
+
+  const intentLabels = {
+    ai:       'AI (Groq)',
+    fallback: 'Pattern match',
+  };
+
+  const confidenceColor =
+    data.confidence >= 90 ? '#16a34a' :
+    data.confidence >= 70 ? '#d97706' : '#dc2626';
+
   return (
     <div className="ai-logic">
-      <button className="ai-logic__toggle" onClick={() => setOpen(o => !o)}>
-        {open ? '▾ Hide AI Logic' : '▸ Show AI Logic'}
+      <button
+        className="ai-logic__toggle"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+      >
+        <svg viewBox="0 0 24 24" width="11" height="11" stroke="currentColor" strokeWidth="2.5" fill="none" style={{ transition: 'transform 0.2s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+        AI Decision
       </button>
       {open && (
         <div className="ai-logic__panel">
           <div className="ai-logic__row">
-            <span>Parsed Items</span>
-            <span>
-              {(data.parsedItems || []).map(i => `${i.qty}× ${i.name}`).join(', ') || '—'}
-            </span>
+            <span>Intent</span>
+            <span>Add to cart</span>
           </div>
           <div className="ai-logic__row">
-            <span>Address Source</span>
-            <span>{data.addressSource || '—'}</span>
+            <span>Items matched</span>
+            <span>{(data.parsedItems || []).map(i => `${i.qty}× ${i.name}`).join(', ') || '—'}</span>
           </div>
           <div className="ai-logic__row">
-            <span>Recommended</span>
+            <span>Address source</span>
+            <span>{addressLabels[data.addressSource] || data.addressSource || '—'}</span>
+          </div>
+          <div className="ai-logic__row">
+            <span>Parser used</span>
+            <span>{intentLabels[data.intentSource] || '—'}</span>
+          </div>
+          <div className="ai-logic__row">
+            <span>Next step</span>
             <span>{data.recommendedAction || '—'}</span>
           </div>
           <div className="ai-logic__row">
             <span>Confidence</span>
-            <span className="ai-logic__confidence">
+            <span style={{ color: confidenceColor, fontWeight: 700 }}>
               {data.confidence != null ? `${data.confidence}%` : '—'}
             </span>
           </div>
-          {/* Raw JSON for transparency */}
-          <pre className="ai-logic__raw">{JSON.stringify(data, null, 2)}</pre>
+          {data.notFound?.length > 0 && (
+            <div className="ai-logic__row ai-logic__row--warn">
+              <span>Not found</span>
+              <span>{data.notFound.join(', ')}</span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -470,9 +503,9 @@ export default function Chat() {
     }
   };
 
-  // ── Category chip handler ──────────────────────────────────────────────────
+    // ── Category chip handler ──────────────────────────────────────────────────
   const handleCategorySelect = (categoryLabel, items) => {
-    const countText = items.length > 0 ? `Top ${items.length} items` : 'No items';
+    const countText = items.length > 0 ? `${items.length} items` : 'No items';
     addMsg('category-result',
       `${countText} in ${categoryLabel}. Tap any item to add it to your cart.`,
       { items }
@@ -533,7 +566,9 @@ export default function Chat() {
                 Hi {user.name?.split(' ')[0] || 'there'}, what would you like to order?
               </h2>
               <p className="welcome__hint">
-                Type below, use voice, or browse by category.
+                {cart && cart.items?.length > 0
+                  ? `You have ${cart.items.reduce((s, i) => s + i.qty, 0)} item${cart.items.reduce((s, i) => s + i.qty, 0) === 1 ? '' : 's'} in your cart — ₹${cart.totalAmount?.toLocaleString('en-IN')}. Continue shopping or tap Pay Now.`
+                  : 'Type below, use voice, or browse by category.'}
               </p>
             </div>
           )}

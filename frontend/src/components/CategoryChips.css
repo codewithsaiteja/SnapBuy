@@ -53,9 +53,15 @@
 }
 
 .category-chip__icon {
-  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
   line-height: 1;
+  flex-shrink: 0;
+  color: inherit;
 }
+
+@keyframes spin-anim { to { transform: rotate(360deg); } }
+.spin-icon { animation: spin-anim 0.8s linear infinite; }
 
 .category-chip__label {
   line-height: 1;

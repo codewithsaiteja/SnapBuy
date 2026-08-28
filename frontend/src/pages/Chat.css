@@ -366,21 +366,19 @@
   30%            { transform: translateY(-6px); opacity: 1;    }
 }
 
-/* ── AI Logic toggle + panel (Label 4) ───────────────────────────────────── */
-/*
-  Screenshot: small "[Show AI Logic]" text link sits directly below the AI bubble.
-  Expanding it reveals a structured breakdown + raw JSON.
-*/
+/* ── AI Decision toggle + panel ──────────────────────────────────────────── */
 .ai-logic {
   margin-top: 5px;
-  /* Align with the left edge of the AI bubble */
 }
 
 .ai-logic__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   background: none;
   border: none;
   padding: 3px 0;
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-weight: 600;
   color: var(--slate-400);
   cursor: pointer;
@@ -400,7 +398,7 @@
   flex-direction: column;
   gap: 5px;
   animation: msgFadeUp 0.15s ease;
-  max-width: 400px;
+  max-width: 380px;
 }
 
 .ai-logic__row {
@@ -410,6 +408,7 @@
   gap: 12px;
   font-size: 0.78rem;
   color: var(--slate-700);
+  line-height: 1.5;
 }
 
 .ai-logic__row span:first-child {
@@ -417,29 +416,16 @@
   font-weight: 600;
   white-space: nowrap;
   flex-shrink: 0;
+  min-width: 90px;
 }
 
-.ai-logic__confidence {
-  color: var(--green);
-  font-weight: 700;
+.ai-logic__row span:last-child {
+  text-align: right;
+  word-break: break-word;
 }
 
-/* Raw JSON block */
-.ai-logic__raw {
-  margin-top: 8px;
-  background: var(--slate-50);
-  border: 1px solid var(--slate-100);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  font-size: 0.72rem;
-  line-height: 1.55;
-  color: var(--slate-600);
-  overflow-x: auto;
-  white-space: pre;
-  font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
-  max-height: 200px;
-  overflow-y: auto;
-}
+.ai-logic__row--warn span:first-child { color: #d97706; }
+.ai-logic__row--warn span:last-child  { color: #d97706; }
 
 /* ── Product recovery suggestion chips ───────────────────────────────────── */
 .suggestion-chips {

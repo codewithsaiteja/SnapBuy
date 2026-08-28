@@ -50,8 +50,8 @@ export async function triggerRazorpay(razorpayOrderId, amount, orderId, onSucces
     key:         keyId,
     amount:      amount * 100,
     currency:    'INR',
-    name:        'Agentic Checkout',
-    description: 'AI-powered order checkout',
+    name:        'SnapBuy',
+    description: 'AI-powered commerce checkout',
     order_id:    razorpayOrderId,
     handler(response) {
       onSuccess?.(response);

@@ -10,7 +10,7 @@ dotenv.config();
 require('dns').setDefaultResultOrder('ipv4first');
 
 // ─── Environment Variable Validation ───────────────────────────────────────────
-const requiredEnvVars = ['MONGO_URI', 'RAZORPAY_KEY_SECRET', 'GROQ_API_KEY'];
+const requiredEnvVars = ['MONGO_URI', 'JWT_SECRET', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'GROQ_API_KEY'];
 const missingVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
 
 if (missingVars.length > 0) {
@@ -59,7 +59,7 @@ app.use('/api',      require('./routes/orderRoutes'));
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => {
-  res.json({ message: 'Agentic Checkout Concierge API is running', status: 'ok' });
+  res.json({ message: 'SnapBuy API is running', status: 'ok', version: '2.0.0' });
 });
 
 const PORT = process.env.PORT || 5000;

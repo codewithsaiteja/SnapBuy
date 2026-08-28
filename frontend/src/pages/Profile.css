@@ -6,6 +6,34 @@
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
+/* Page header — brand + title */
+.profile-page-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.profile-page-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+
+.profile-page-brand span {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.04em;
+}
+
+.profile-page-title {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #64748b;
+  letter-spacing: 0;
+  margin: 0;
+}
+
 .profile-back {
   display: inline-flex;
   align-items: center;

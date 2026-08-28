@@ -28,10 +28,6 @@ const auth = (req, res, next) => {
   }
 };
 
-// ─── Catalog ───────────────────────────────────────────────────────────────────
-const CATALOG_KEYWORDS = ['coffee', 'mouse', 'usb', 'cable', 'notebook', 'lamp', 'desk'];
-const CATALOG_DISPLAY  = 'Coffee, Mouse, USB-C Cable, Notebook, Desk Lamp';
-
 // ─── Audit helper (non-fatal) ─────────────────────────────────────────────────
 async function audit(userId, action, status, input, output, metadata = {}) {
   try {
@@ -40,8 +36,8 @@ async function audit(userId, action, status, input, output, metadata = {}) {
       orderId:   metadata.orderId || null,
       action,
       status,
-      input:     String(input  || ''),
-      output:    String(output || ''),
+      input:     String(input  || '').slice(0, 1000),
+      output:    String(output || '').slice(0, 1000),
       metadata,
       timestamp: new Date(),
     });
@@ -51,82 +47,159 @@ async function audit(userId, action, status, input, output, metadata = {}) {
 }
 
 // ─── Product matching helper ───────────────────────────────────────────────────
-function matchProduct(name, products) {
-  const n = (name || '').toLowerCase().trim();
-  return products.find(p => {
-    const pn = p.name.toLowerCase();
-    return pn === n || pn.includes(n) || n.includes(pn);
-  });
+// Scores a candidate name against a query; returns 0 if no match.
+function scoreMatch(query, productName) {
+  const q  = query.toLowerCase().trim();
+  const pn = productName.toLowerCase().trim();
+  if (pn === q)           return 100;
+  if (pn.startsWith(q))  return 90;
+  if (pn.includes(q))    return 80;
+  if (q.includes(pn))    return 70;
+
+  // Token overlap scoring
+  const qTokens  = q.split(/\s+/).filter(t => t.length > 1);
+  const pTokens  = pn.split(/[\s\(\)\-]+/).filter(t => t.length > 1);
+  let overlap = 0;
+  for (const qt of qTokens) {
+    if (pTokens.some(pt => pt.includes(qt) || qt.includes(pt))) overlap++;
+  }
+  if (overlap > 0) return Math.round((overlap / Math.max(qTokens.length, 1)) * 60);
+  return 0;
 }
 
-// ─── Finalize order (create DB order + Razorpay order) ────────────────────────
-async function finalizeOrder(userId, items, address, addressSource) {
-  const products = await Product.find({});
-  if (!products.length) throw new Error('Product catalog is unavailable.');
+function matchProduct(name, products) {
+  let best = null, bestScore = 0;
+  for (const p of products) {
+    const s = scoreMatch(name, p.name);
+    if (s > bestScore) { bestScore = s; best = p; }
+  }
+  return bestScore >= 40 ? best : null;
+}
 
-  const orderItems = [];
-  const notFound   = [];
-  let   total      = 0;
+// ─── Deterministic NLP fallback (regex-based) ─────────────────────────────────
+// Used when AI fails or returns empty. Handles patterns like:
+//   "Add 2 Coffee", "Buy Coffee", "I want 3 Coffee", "Give me 2 Coffee"
+function deterministicParse(message) {
+  const msg = message.toLowerCase().trim();
 
-  for (const item of items) {
-    const product = matchProduct(item.name, products);
-    if (product) {
-      const qty = Math.max(1, parseInt(item.qty) || 1);
-      orderItems.push({ name: product.name, qty, price: product.price });
-      total += product.price * qty;
-    } else {
-      notFound.push(item.name);
+  // Number word map
+  const numWords = {
+    one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    a: 1, an: 1,
+  };
+
+  // Strip intent verbs from start
+  const stripped = msg
+    .replace(/^(add|buy|order|i want|give me|can i get|i need|i'd like|get me|please add|please buy|could i get|bring me|i'll take|make it|change.*?to|update.*?to)\s+/i, '')
+    .replace(/\s+(to my cart|in my cart|please|now)$/i, '')
+    .trim();
+
+  // Pattern: "2 Coffee", "two Coffee", "Coffee x 2", "3x Coffee"
+  let qty = 1;
+  let productName = stripped;
+
+  // Match leading number or word
+  const leadNum = stripped.match(/^(\d+|one|two|three|four|five|six|seven|eight|nine|ten|a|an)\s+(.+)$/i);
+  if (leadNum) {
+    qty = parseInt(leadNum[1]) || numWords[leadNum[1].toLowerCase()] || 1;
+    productName = leadNum[2].trim();
+  }
+
+  // Match trailing number: "Coffee 2" or "Coffee x 2"
+  const trailNum = stripped.match(/^(.+?)\s+x?\s*(\d+)$/i);
+  if (trailNum && !leadNum) {
+    productName = trailNum[1].trim();
+    qty = parseInt(trailNum[2]) || 1;
+  }
+
+  // Strip plural s at end if needed
+  if (productName.endsWith('s') && productName.length > 3) {
+    productName = productName.slice(0, -1);
+  }
+
+  return [{ name: productName, qty: Math.max(1, qty) }];
+}
+
+// ─── Parse quantity change commands ───────────────────────────────────────────
+// "Change Coffee to 5", "Make Coffee 3", "Update Coffee quantity to 4"
+function parseQtyChange(msg) {
+  const m = msg.match(/(?:change|update|make|set)\s+(.+?)\s+(?:to|quantity to|qty to)\s+(\d+)/i)
+         || msg.match(/(?:change|update|make|set)\s+(.+?)\s+(\d+)/i);
+  if (!m) return null;
+  return { productName: m[1].trim(), newQty: parseInt(m[2]) };
+}
+
+// ─── Parse remove commands ─────────────────────────────────────────────────────
+function parseRemoveCommand(msg) {
+  const m = msg.match(/^(remove|delete|discard|drop|take out)\s+(.+)$/i);
+  if (!m) return null;
+  return m[2].trim();
+}
+
+// ─── Groq AI intent parser with deterministic fallback ────────────────────────
+async function parseIntent(message, catalogProducts) {
+  const catalogSample = catalogProducts
+    .slice(0, 30)
+    .map(p => p.name)
+    .join(', ');
+
+  const systemPrompt = `You are a shopping assistant. Extract product names and quantities from user messages.
+Available products (use exact names from this list when possible): ${catalogSample}
+Rules:
+- Return ONLY valid JSON. No markdown, no explanation, no code fences.
+- Match product names to the available list. Prefer exact or closest match.
+- qty defaults to 1 if not mentioned. Number words (two=2, three=3) should be converted.
+- If no recognizable product, return empty items array.
+- For address in message, include it. Otherwise "NOT_PROVIDED".
+Output format: {"items":[{"name":"exact product name","qty":2}],"address":"NOT_PROVIDED"}`;
+
+  let groqResult = null;
+  try {
+    const resp = await groq.chat.completions.create({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: message },
+      ],
+      model:       'qwen/qwen3.8-27b',
+      temperature: 0,
+      max_tokens:  256,
+      stream:      false,
+    });
+    const raw = resp.choices[0]?.message?.content || '';
+    const cleaned = raw.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
+    if (cleaned) {
+      groqResult = JSON.parse(cleaned);
     }
+  } catch (e) {
+    console.warn('[INTENT] Groq parse failed, using fallback:', e.message.slice(0, 80));
   }
 
-  if (!orderItems.length) {
-    throw new Error(`Product(s) not found: "${notFound.join(', ')}". Available: ${CATALOG_DISPLAY}.`);
+  // Validate groqResult
+  if (groqResult && Array.isArray(groqResult.items) && groqResult.items.length > 0) {
+    return {
+      items:   groqResult.items,
+      address: groqResult.address || 'NOT_PROVIDED',
+      source:  'ai',
+    };
   }
 
-  const confidence = Math.max(0, 100 - notFound.length * 20);
-
-  const order = new Order({
-    userId,
-    items:       orderItems,
-    totalAmount: total,
-    address,
-    status:      'PENDING',
-    aiLogic: {
-      parsedItems:       orderItems,
-      addressSource,
-      confidence,
-      recommendedAction: 'Proceed to checkout',
-    },
-  });
-  await order.save();
-
-  const rzpOrder = await razorpay.orders.create({
-    amount:   total * 100,
-    currency: 'INR',
-    receipt:  order._id.toString(),
-    notes:    { orderId: order._id.toString(), userId: String(userId) },
-  });
-
-  order.razorpayOrderId = rzpOrder.id;
-  order.status          = 'ORDER_CREATED';
-  order.updatedAt       = new Date();
-  await order.save();
-
-  await audit(userId, 'ORDER_CREATED', 'SUCCESS',
-    `Items: ${orderItems.map(i => `${i.qty}x${i.name}`).join(', ')}`,
-    `orderId=${order._id} rzp=${rzpOrder.id} total=₹${total}`,
-    { orderId: order._id, address, addressSource, total }
-  );
-
-  return { order, orderItems, total, razorpayOrderId: rzpOrder.id, confidence };
+  // Deterministic fallback
+  console.log('[INTENT] Using deterministic fallback for:', message);
+  const fallbackItems = deterministicParse(message);
+  return {
+    items:   fallbackItems,
+    address: 'NOT_PROVIDED',
+    source:  'fallback',
+  };
 }
 
 // =============================================================================
-// GET /products — public, used by ProductGrid
+// GET /products — public product catalog
 // =============================================================================
 router.get('/products', async (req, res) => {
   try {
-    const products = await Product.find({}, 'name price image').lean();
+    const products = await Product.find({}, 'name price image category').lean();
     res.json({ success: true, products });
   } catch (err) {
     console.error('[PRODUCTS]', err.message);
@@ -135,7 +208,56 @@ router.get('/products', async (req, res) => {
 });
 
 // =============================================================================
-// GET /user/profile — authenticated user dashboard data
+// GET /products/search?q=coffee&limit=5&category=true
+// =============================================================================
+router.get('/products/search', auth, async (req, res) => {
+  try {
+    const q         = (req.query.q || '').trim();
+    const limit     = Math.min(parseInt(req.query.limit) || 5, 20);
+    const byCategory = req.query.category === 'true';
+
+    if (!q) return res.json({ success: true, products: [] });
+
+    let products;
+    if (byCategory) {
+      products = await Product.find(
+        { category: { $regex: q, $options: 'i' } },
+        'name price category'
+      ).sort({ price: 1 }).limit(limit).lean();
+    } else {
+      try {
+        products = await Product.find(
+          { $text: { $search: q } },
+          { score: { $meta: 'textScore' }, name: 1, price: 1, category: 1 }
+        ).sort({ score: { $meta: 'textScore' } }).limit(limit).lean();
+      } catch {
+        products = [];
+      }
+      if (!products || products.length === 0) {
+        products = await Product.find(
+          { name: { $regex: q, $options: 'i' } },
+          'name price category'
+        ).limit(limit).lean();
+      }
+    }
+
+    res.json({
+      success: true,
+      products: (products || []).map(p => ({
+        id:       p._id,
+        name:     p.name,
+        price:    p.price,
+        category: p.category,
+      })),
+    });
+  } catch (err) {
+    console.error('[PRODUCT SEARCH]', err.message);
+    res.status(500).json({ success: false, error: 'Search failed' });
+  }
+});
+
+// =============================================================================
+// GET /user/profile
 // =============================================================================
 router.get('/user/profile', auth, async (req, res) => {
   try {
@@ -143,7 +265,7 @@ router.get('/user/profile', auth, async (req, res) => {
     if (!user) return res.status(404).json({ success: false, error: 'User not found' });
 
     const [totalOrders, paidOrders, pendingOrders] = await Promise.all([
-      Order.countDocuments({ userId: req.user.userId }),
+      Order.countDocuments({ userId: req.user.userId, status: { $nin: ['CART'] } }),
       Order.find({ userId: req.user.userId, status: 'PAID' }).select('totalAmount').lean(),
       Order.countDocuments({ userId: req.user.userId, status: { $in: ['PENDING', 'ORDER_CREATED', 'RETRY_GENERATED'] } }),
     ]);
@@ -168,7 +290,7 @@ router.get('/user/profile', auth, async (req, res) => {
 });
 
 // =============================================================================
-// PATCH /user/address — save default delivery address
+// PATCH /user/address
 // =============================================================================
 router.patch('/user/address', auth, async (req, res) => {
   try {
@@ -186,7 +308,7 @@ router.patch('/user/address', auth, async (req, res) => {
 });
 
 // =============================================================================
-// GET /cart — fetch active cart
+// GET /cart — fetch active CART
 // =============================================================================
 router.get('/cart', auth, async (req, res) => {
   try {
@@ -199,50 +321,145 @@ router.get('/cart', auth, async (req, res) => {
 });
 
 // =============================================================================
-// POST /cart/finalize — turn cart into an order and generate Razorpay order
+// POST /cart/add — add a single product to cart (from ProductGrid "Add" button)
+// =============================================================================
+router.post('/cart/add', auth, async (req, res) => {
+  try {
+    const { productName, qty = 1 } = req.body;
+    if (!productName?.trim()) {
+      return res.status(400).json({ success: false, error: 'Product name required' });
+    }
+
+    const allProducts = await Product.find({}).lean();
+    const product = matchProduct(productName, allProducts);
+    if (!product) {
+      const suggestions = allProducts.slice(0, 5).map(p => p.name);
+      return res.json({
+        success: false,
+        isInvalid: true,
+        message: `"${productName}" is not available. Here are some products you might like:`,
+        suggestions,
+      });
+    }
+
+    const safeQty = Math.max(1, parseInt(qty) || 1);
+    const userId  = req.user.userId;
+
+    let cart = await Order.findOne({ userId, status: 'CART' });
+    const userDoc = await User.findById(userId).select('defaultAddress').lean();
+    const savedAddr = userDoc?.defaultAddress?.trim() || '';
+
+    if (!cart) {
+      cart = new Order({
+        userId,
+        items: [],
+        totalAmount: 0,
+        address: savedAddr || 'Address Pending',
+        status: 'CART',
+      });
+    }
+
+    const existing = cart.items.find(i => i.name.toLowerCase() === product.name.toLowerCase());
+    if (existing) {
+      existing.qty += safeQty;
+    } else {
+      cart.items.push({ name: product.name, qty: safeQty, price: product.price });
+    }
+
+    cart.totalAmount = cart.items.reduce((sum, i) => sum + i.price * i.qty, 0);
+    cart.updatedAt   = new Date();
+    await cart.save();
+
+    await audit(userId, 'CART_UPDATED', 'SUCCESS',
+      `Added ${safeQty}x ${product.name}`,
+      `Cart total: ₹${cart.totalAmount}`,
+      { cartId: cart._id }
+    );
+
+    res.json({
+      success:     true,
+      message:     `Added ${safeQty}× ${product.name} to cart.`,
+      cart:        { items: cart.items, totalAmount: cart.totalAmount, address: cart.address },
+    });
+  } catch (err) {
+    console.error('[CART ADD]', err.message);
+    res.status(500).json({ success: false, error: 'Failed to add to cart' });
+  }
+});
+
+// =============================================================================
+// POST /cart/finalize — turn CART into ORDER_CREATED + Razorpay order
+// Idempotent: if already ORDER_CREATED with same items, reuse it.
 // =============================================================================
 router.post('/cart/finalize', auth, async (req, res) => {
   try {
-    const cart = await Order.findOne({ userId: req.user.userId, status: 'CART' });
+    const userId = req.user.userId;
+    const cart   = await Order.findOne({ userId, status: 'CART' });
     if (!cart) return res.status(400).json({ error: 'No active cart found' });
 
-    let address = cart.address;
-    if (!address || address === 'Address Pending' || address === 'NOT_PROVIDED') {
-      const user = await User.findById(req.user.userId).select('defaultAddress').lean();
-      address = user?.defaultAddress?.trim();
+    // Resolve address
+    let address = (cart.address && cart.address !== 'Address Pending') ? cart.address : '';
+    if (!address) {
+      const user = await User.findById(userId).select('defaultAddress').lean();
+      address = user?.defaultAddress?.trim() || '';
     }
 
     if (!address) {
-      return res.status(400).json({ addressRequired: true, error: 'Delivery address is required.' });
+      return res.status(400).json({
+        addressRequired: true,
+        error: 'Delivery address is required.',
+        pendingItems: cart.items,
+      });
     }
 
-    cart.address = address;
-    cart.status = 'ORDER_CREATED';
+    // Idempotency check: if ORDER_CREATED already exists for same user with same items total
+    const existingOrder = await Order.findOne({
+      userId,
+      status: 'ORDER_CREATED',
+      totalAmount: cart.totalAmount,
+    }).sort({ createdAt: -1 });
+
+    if (existingOrder && existingOrder.razorpayOrderId) {
+      // Reuse the existing Razorpay order to prevent duplicate charges
+      await Order.findByIdAndDelete(cart._id);
+      return res.json({
+        success:         true,
+        orderId:         existingOrder._id.toString(),
+        razorpayOrderId: existingOrder.razorpayOrderId,
+        totalAmount:     existingOrder.totalAmount,
+        address:         existingOrder.address,
+        items:           existingOrder.items,
+        reused:          true,
+      });
+    }
+
+    cart.address   = address;
+    cart.status    = 'ORDER_CREATED';
     cart.updatedAt = new Date();
 
     const rzpOrder = await razorpay.orders.create({
-      amount: cart.totalAmount * 100,
+      amount:   cart.totalAmount * 100,
       currency: 'INR',
-      receipt: cart._id.toString(),
-      notes: { orderId: cart._id.toString(), userId: String(req.user.userId) },
+      receipt:  cart._id.toString().slice(-12),
+      notes:    { orderId: cart._id.toString(), userId: String(userId) },
     });
 
     cart.razorpayOrderId = rzpOrder.id;
     await cart.save();
 
-    await audit(req.user.userId, 'ORDER_CREATED', 'SUCCESS',
-      `Finalized cart: ${cart.items.map(i => `${i.qty}x${i.name}`).join(', ')}`,
+    await audit(userId, 'ORDER_CREATED', 'SUCCESS',
+      `Finalized: ${cart.items.map(i => `${i.qty}x${i.name}`).join(', ')}`,
       `orderId=${cart._id} rzp=${rzpOrder.id} total=₹${cart.totalAmount}`,
       { orderId: cart._id, address, total: cart.totalAmount }
     );
 
     res.json({
-      success: true,
-      orderId: cart._id.toString(),
+      success:         true,
+      orderId:         cart._id.toString(),
       razorpayOrderId: rzpOrder.id,
-      totalAmount: cart.totalAmount,
-      address: cart.address,
-      items: cart.items,
+      totalAmount:     cart.totalAmount,
+      address:         cart.address,
+      items:           cart.items,
     });
   } catch (err) {
     console.error('[FINALIZE CART]', err.message);
@@ -251,7 +468,7 @@ router.post('/cart/finalize', auth, async (req, res) => {
 });
 
 // =============================================================================
-// POST /chat — main AI checkout flow
+// POST /chat — main AI shopping assistant
 // =============================================================================
 router.post('/chat', auth, async (req, res) => {
   const { message, isAddress, pendingItems } = req.body;
@@ -266,316 +483,287 @@ router.post('/chat', auth, async (req, res) => {
 
   await audit(userId, 'CHAT_INPUT', 'INFO', trimmed, '', {});
 
-  // ── Case A: 2-step flow — user just provided address ─────────────────────
+  // ── Case A: Address provided for 2-step flow ─────────────────────────────
   if (isAddress && Array.isArray(pendingItems) && pendingItems.length > 0) {
     try {
+      // Update or create cart with the address, then finalize
       let cart = await Order.findOne({ userId, status: 'CART' });
       if (!cart) {
         cart = new Order({
           userId,
-          items: pendingItems.map(i => ({ name: i.name, qty: i.qty, price: i.price })),
-          totalAmount: pendingItems.reduce((sum, i) => sum + (i.price * i.qty), 0),
-          status: 'CART',
+          items:       pendingItems.map(i => ({ name: i.name, qty: i.qty, price: i.price })),
+          totalAmount: pendingItems.reduce((s, i) => s + i.price * i.qty, 0),
+          status:      'CART',
         });
       }
-      cart.address = trimmed;
-      cart.status = 'ORDER_CREATED';
+      cart.address   = trimmed;
+      cart.status    = 'ORDER_CREATED';
       cart.updatedAt = new Date();
 
       const rzpOrder = await razorpay.orders.create({
-        amount: cart.totalAmount * 100,
+        amount:   cart.totalAmount * 100,
         currency: 'INR',
-        receipt: cart._id.toString(),
-        notes: { orderId: cart._id.toString(), userId: String(userId) },
+        receipt:  cart._id.toString().slice(-12),
+        notes:    { orderId: cart._id.toString(), userId: String(userId) },
       });
-
       cart.razorpayOrderId = rzpOrder.id;
       await cart.save();
 
-      // Save to user profile
+      // Save address to profile for future auto-fill
       await User.findByIdAndUpdate(userId, { defaultAddress: trimmed });
       await audit(userId, 'ADDRESS_SAVED', 'SUCCESS', trimmed, 'Saved from order', { orderId: cart._id });
-      await audit(userId, 'ORDER_CREATED', 'SUCCESS', `Finalized cart via address input: ${cart.items.map(i => `${i.qty}x${i.name}`).join(', ')}`, `orderId=${cart._id} rzp=${rzpOrder.id}`, { orderId: cart._id, address: trimmed });
 
       return res.json({
         success:         true,
-        message:         'Address saved for future orders. Your order is ready.',
+        message:         `Address saved. Your order is ready.`,
         parsed:          { items: cart.items, address: trimmed },
         totalAmount:     cart.totalAmount,
         razorpayOrderId: rzpOrder.id,
         amountInPaise:   cart.totalAmount * 100,
         orderId:         cart._id.toString(),
         itemsSummary:    cart.items.map(i => `${i.qty}× ${i.name}`).join(', '),
-        cart: null,
+        cart:            null,
+        aiLogic: {
+          parsedItems:       cart.items,
+          addressSource:     'message',
+          confidence:        100,
+          recommendedAction: 'Proceed to payment',
+        },
       });
     } catch (err) {
       console.error('[CHAT/addr]', err.message);
-      return res.json({ success: false, message: err.message });
+      return res.json({ success: false, message: 'Failed to process address. Please try again.' });
     }
   }
 
   const msgLower = trimmed.toLowerCase();
 
-  // Clear Cart
-  if (msgLower.includes('clear cart') || msgLower.includes('empty cart')) {
+  // ── Clear cart ────────────────────────────────────────────────────────────
+  if (msgLower.includes('clear cart') || msgLower.includes('empty cart') || msgLower.includes('reset cart')) {
     await Order.findOneAndDelete({ userId, status: 'CART' });
     await audit(userId, 'CART_CLEARED', 'SUCCESS', trimmed, 'Cart cleared', {});
-    return res.json({
-      success: true,
-      message: 'Cart cleared successfully.',
-      cart: null,
-    });
+    return res.json({ success: true, message: 'Cart cleared.', cart: null });
   }
 
-  // Remove/Delete item from Cart
-  if (msgLower.startsWith('remove ') || msgLower.startsWith('delete ') || msgLower.startsWith('discard ')) {
-    const itemToRemove = trimmed.replace(/^(remove|delete|discard)\s+/i, '').trim();
+  // ── Remove item from cart ────────────────────────────────────────────────
+  const removeTarget = parseRemoveCommand(trimmed);
+  if (removeTarget) {
     const cart = await Order.findOne({ userId, status: 'CART' });
     if (!cart) {
       return res.json({ success: false, message: 'Your cart is already empty.' });
     }
+    const allProducts = await Product.find({}).lean();
+    const matchedProduct = matchProduct(removeTarget, allProducts);
+    const searchTerm = matchedProduct ? matchedProduct.name.toLowerCase() : removeTarget.toLowerCase();
 
-    const initialCount = cart.items.length;
-    cart.items = cart.items.filter(item => {
-      const name = item.name.toLowerCase();
-      const target = itemToRemove.toLowerCase();
-      return !name.includes(target) && !target.includes(name);
-    });
+    const before = cart.items.length;
+    cart.items = cart.items.filter(item => !item.name.toLowerCase().includes(searchTerm) && !searchTerm.includes(item.name.toLowerCase().split(' ')[0]));
 
-    if (cart.items.length === initialCount) {
-      return res.json({ success: false, message: `Could not find "${itemToRemove}" in your cart.` });
+    if (cart.items.length === before) {
+      return res.json({ success: false, message: `"${removeTarget}" was not found in your cart.` });
     }
 
     if (cart.items.length === 0) {
       await Order.findByIdAndDelete(cart._id);
-      await audit(userId, 'CART_CLEARED', 'SUCCESS', trimmed, 'Cart cleared because all items removed', {});
-      return res.json({ success: true, message: `Removed ${itemToRemove} from cart. Your cart is now empty.`, cart: null });
+      await audit(userId, 'CART_CLEARED', 'SUCCESS', trimmed, 'Cart empty after remove', {});
+      return res.json({ success: true, message: `Removed ${removeTarget} from cart. Cart is now empty.`, cart: null });
     }
 
-    cart.totalAmount = cart.items.reduce((sum, item) => sum + (item.price * item.qty), 0);
-    cart.updatedAt = new Date();
+    cart.totalAmount = cart.items.reduce((s, i) => s + i.price * i.qty, 0);
+    cart.updatedAt   = new Date();
     await cart.save();
-
-    await audit(userId, 'CART_ITEM_REMOVED', 'SUCCESS', trimmed, `Removed ${itemToRemove}. New total: ₹${cart.totalAmount}`, { cartId: cart._id });
+    await audit(userId, 'CART_ITEM_REMOVED', 'SUCCESS', trimmed, `Removed. New total: ₹${cart.totalAmount}`, { cartId: cart._id });
 
     return res.json({
       success: true,
-      message: `Removed ${itemToRemove} from your cart.`,
-      cart: {
-        items: cart.items,
-        totalAmount: cart.totalAmount,
-      }
+      message: `Removed ${removeTarget} from your cart.`,
+      cart: { items: cart.items, totalAmount: cart.totalAmount, address: cart.address },
     });
   }
 
-  // ── Find matching products in database ─────────────────────────────────────
-  let matches = [];
+  // ── Change quantity ───────────────────────────────────────────────────────
+  const qtyChange = parseQtyChange(trimmed);
+  if (qtyChange) {
+    const cart = await Order.findOne({ userId, status: 'CART' });
+    if (!cart) {
+      return res.json({ success: false, message: 'No active cart to edit.' });
+    }
+    const allProducts = await Product.find({}).lean();
+    const matched = matchProduct(qtyChange.productName, allProducts);
+    const searchTerm = matched ? matched.name.toLowerCase() : qtyChange.productName.toLowerCase();
+
+    const item = cart.items.find(i => i.name.toLowerCase().includes(searchTerm) || searchTerm.includes(i.name.toLowerCase().split(' ')[0]));
+    if (!item) {
+      return res.json({ success: false, message: `"${qtyChange.productName}" is not in your cart.` });
+    }
+
+    item.qty = Math.max(1, qtyChange.newQty);
+    cart.totalAmount = cart.items.reduce((s, i) => s + i.price * i.qty, 0);
+    cart.updatedAt   = new Date();
+    await cart.save();
+    await audit(userId, 'ORDER_EDITED', 'SUCCESS', trimmed, `Updated qty. New total: ₹${cart.totalAmount}`, { cartId: cart._id });
+
+    return res.json({
+      success: true,
+      message: `Updated ${item.name} quantity to ${item.qty}. Cart total: ₹${cart.totalAmount.toLocaleString('en-IN')}.`,
+      cart: { items: cart.items, totalAmount: cart.totalAmount, address: cart.address },
+    });
+  }
+
+  // ── Fetch user's saved address ────────────────────────────────────────────
+  const userDoc   = await User.findById(userId).select('defaultAddress').lean();
+  const savedAddr = userDoc?.defaultAddress?.trim() || '';
+
+  // ── Find candidate products for AI context (text search) ─────────────────
+  let searchMatches = [];
   try {
-    matches = await Product.find(
+    searchMatches = await Product.find(
       { $text: { $search: trimmed } },
       { score: { $meta: 'textScore' } }
-    )
-    .sort({ score: { $meta: 'textScore' } })
-    .limit(5)
-    .lean();
-  } catch (err) {
-    console.warn('[SEARCH] Text search failed, falling back to regex:', err.message);
-  }
-
-  if (!matches || matches.length === 0) {
-    const words = trimmed.split(/\s+/).filter(w => w.length > 2 && !['add', 'buy', 'get', 'with', 'from', 'your', 'need'].includes(w.toLowerCase()));
-    if (words.length > 0) {
-      const regexQueries = words.map(w => ({ name: { $regex: w, $options: 'i' } }));
-      matches = await Product.find({ $or: regexQueries }).limit(5).lean();
-    }
-  }
-
-  // Fallback to any 5 popular products if still no matches
-  if (!matches || matches.length === 0) {
-    matches = await Product.find({}).limit(5).lean();
-  }
-
-  // ── Groq intent parsing ────────────────────────────────────────────────────
-  let groqResponse = '';
-  try {
-    const systemPrompt = `You are a shopping checkout bot. Extract product names, quantities, and delivery address from the user message.
-RULES:
-1. Return ONLY valid JSON. No markdown, no explanations, no code fences.
-2. Valid products you can select from: ${matches.map(p => p.name).join(', ')}.
-3. qty defaults to 1 if not specified.
-4. If address is in the message, include it. Otherwise set address to "NOT_PROVIDED".
-5. Output EXACTLY: {"items":[{"name":"Product Name","qty":2}],"address":"Tadipatri Station"}`;
-
-    const stream = await groq.chat.completions.create({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: trimmed },
-      ],
-      model:       'openai/gpt-oss-20b',
-      temperature: 0,
-      max_tokens:  256,
-      stream:      true,
-    });
-    for await (const chunk of stream) {
-      groqResponse += chunk.choices[0]?.delta?.content || '';
-    }
-    console.log('[CHAT] Groq:', groqResponse);
-  } catch (groqErr) {
-    console.error('[CHAT] GROQ ERROR:', groqErr.message);
-    return res.json({ success: false, message: 'AI service unavailable. Please try again.' });
-  }
-
-  await audit(userId, 'CHAT_OUTPUT', 'INFO', trimmed, groqResponse, {});
-
-  // Parse JSON
-  let parsed;
-  try {
-    const cleaned = groqResponse.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
-    parsed = JSON.parse(cleaned);
+    ).sort({ score: { $meta: 'textScore' } }).limit(8).lean();
   } catch {
-    console.error('[CHAT] JSON parse fail:', groqResponse);
-    return res.json({ success: false, message: "I couldn't understand your order. Try: \"Add 2 Coffee\"." });
+    // text search may fail if no index — use regex fallback
   }
 
-  if (!parsed || !Array.isArray(parsed.items) || !parsed.items.length) {
-    return res.json({ success: false, message: 'No products detected. Try: "Add 2 Coffee".' });
-  }
+  const allProducts = await Product.find({}).lean();
 
-  // ── Cart management ────────────────────────────────────────────────────────
-  let cart = await Order.findOne({ userId, status: 'CART' });
-  const userDoc = await User.findById(userId).select('defaultAddress').lean();
-  const defaultAddr = userDoc?.defaultAddress?.trim() || 'NOT_PROVIDED';
-  const hasAddressInMessage = parsed.address && parsed.address !== 'NOT_PROVIDED' && parsed.address.trim();
-  const cartAddress = hasAddressInMessage ? parsed.address : (cart?.address || defaultAddr);
+  // ── AI intent parsing with fallback ──────────────────────────────────────
+  const candidates = searchMatches.length > 0
+    ? [...searchMatches, ...allProducts].slice(0, 40)
+    : allProducts;
 
-  if (!cart) {
-    cart = new Order({
-      userId,
-      items: [],
-      totalAmount: 0,
-      address: cartAddress === 'NOT_PROVIDED' ? 'Address Pending' : cartAddress,
-      status: 'CART',
+  const intent = await parseIntent(trimmed, candidates);
+  console.log(`[CHAT] Intent(${intent.source}):`, JSON.stringify(intent.items));
+
+  await audit(userId, 'INTENT_PARSED', 'INFO', trimmed, JSON.stringify(intent), { source: intent.source });
+
+  if (!intent.items || intent.items.length === 0) {
+    // No products detected — return helpful suggestions
+    const popularProducts = await Product.find({}).limit(5).lean();
+    const suggestions = popularProducts.map(p => p.name);
+    await audit(userId, 'CHAT_OUTPUT', 'INFO', trimmed, 'No products detected', {});
+    return res.json({
+      success:     false,
+      isInvalid:   true,
+      message:     `I couldn't find a product matching your request. Here are some popular items you can order:`,
+      suggestions,
     });
-  } else if (hasAddressInMessage) {
-    cart.address = parsed.address;
   }
 
-  const allProducts = await Product.find({});
+  // ── Resolve products from intent ──────────────────────────────────────────
   const resolvedItems = [];
-  const notFound = [];
+  const notFound      = [];
 
-  for (const item of parsed.items) {
-    const product = matchProduct(item.name, matches.concat(allProducts));
+  for (const item of intent.items) {
+    const product = matchProduct(item.name, allProducts);
     if (product) {
-      const qty = Math.max(1, parseInt(item.qty) || 1);
-      const existing = cart.items.find(i => i.name.toLowerCase() === product.name.toLowerCase());
-      if (existing) {
-        existing.qty += qty;
-      } else {
-        cart.items.push({ name: product.name, qty, price: product.price });
-      }
-      resolvedItems.push({ name: product.name, qty, price: product.price });
+      resolvedItems.push({
+        name:  product.name,
+        qty:   Math.max(1, parseInt(item.qty) || 1),
+        price: product.price,
+      });
     } else {
       notFound.push(item.name);
     }
   }
 
-  if (cart.items.length === 0) {
-    return res.json({ success: false, message: 'No valid products detected. Try: "Add 2 Coffee".' });
+  await audit(userId, 'PRODUCT_MATCHED', resolvedItems.length > 0 ? 'SUCCESS' : 'FAILURE',
+    intent.items.map(i => i.name).join(', '),
+    resolvedItems.map(i => i.name).join(', '),
+    {}
+  );
+
+  if (resolvedItems.length === 0) {
+    // Product in intent but not in catalog
+    const suggestions = allProducts.slice(0, 6).map(p => p.name);
+    return res.json({
+      success:     false,
+      isInvalid:   true,
+      message:     `I couldn't find "${notFound.join(', ')}" in SnapBuy's catalog. Here are available products:`,
+      suggestions,
+    });
   }
 
-  cart.totalAmount = cart.items.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  cart.updatedAt = new Date();
+  // ── Update CART (create or merge) ─────────────────────────────────────────
+  let cart = await Order.findOne({ userId, status: 'CART' });
+
+  // Determine address: message > saved profile > pending
+  const hasAddressInMessage = intent.address && intent.address !== 'NOT_PROVIDED';
+  const cartAddress = hasAddressInMessage
+    ? intent.address
+    : (savedAddr || 'Address Pending');
+
+  if (!cart) {
+    cart = new Order({
+      userId,
+      items:       [],
+      totalAmount: 0,
+      address:     cartAddress,
+      status:      'CART',
+    });
+  } else if (hasAddressInMessage) {
+    cart.address = intent.address;
+  } else if (savedAddr && (!cart.address || cart.address === 'Address Pending')) {
+    cart.address = savedAddr;
+  }
+
+  // Merge items into cart
+  for (const item of resolvedItems) {
+    const existing = cart.items.find(i => i.name.toLowerCase() === item.name.toLowerCase());
+    if (existing) {
+      existing.qty += item.qty;
+    } else {
+      cart.items.push({ name: item.name, qty: item.qty, price: item.price });
+    }
+  }
+
+  cart.totalAmount = cart.items.reduce((s, i) => s + i.price * i.qty, 0);
+  cart.updatedAt   = new Date();
   await cart.save();
 
-  await audit(userId, 'CART_UPDATED', 'SUCCESS', trimmed, `Cart updated, total items: ${cart.items.length}`, { cartId: cart._id });
+  await audit(userId, 'CART_UPDATED', 'SUCCESS',
+    trimmed,
+    `Cart updated. Items: ${cart.items.length}. Total: ₹${cart.totalAmount}`,
+    { cartId: cart._id }
+  );
 
-  const total = cart.totalAmount;
-  const addressMessage = (cart.address && cart.address !== 'Address Pending' && cart.address !== 'NOT_PROVIDED')
+  // Compose response message
+  const itemsSummary = resolvedItems.map(i => `${i.qty}× ${i.name}`).join(', ');
+  const addressInfo  = (cart.address && cart.address !== 'Address Pending' && cart.address !== 'NOT_PROVIDED')
     ? ` Delivering to ${cart.address}.`
     : '';
+  const notFoundNote = notFound.length > 0 ? ` (Note: "${notFound.join(', ')}" not found in catalog)` : '';
 
-  const finalMessage = addressMessage
-    ? `Found your items.${addressMessage} Total: ₹${total}.`
-    : `Found your items. Total: ₹${total}. Please provide your delivery address.`;
+  const addressSource = hasAddressInMessage ? 'message' : (savedAddr ? 'profile' : 'not_provided');
+
+  let responseMessage;
+  if (addressInfo) {
+    responseMessage = `Added ${itemsSummary} to your cart.${addressInfo} Total: ₹${cart.totalAmount.toLocaleString('en-IN')}.${notFoundNote}`;
+  } else {
+    responseMessage = `Added ${itemsSummary} to your cart. Total: ₹${cart.totalAmount.toLocaleString('en-IN')}. Please provide your delivery address to proceed.${notFoundNote}`;
+  }
+
+  // If saved address exists, don't ask again
+  if (savedAddr && !hasAddressInMessage) {
+    responseMessage = `Added ${itemsSummary} to your cart. Using saved address: ${savedAddr}. Total: ₹${cart.totalAmount.toLocaleString('en-IN')}.${notFoundNote}`;
+  }
 
   return res.json({
-    success: true,
-    message: finalMessage,
-    cart: {
-      items: cart.items,
-      totalAmount: cart.totalAmount,
-      address: cart.address,
-    },
-    parsed: { items: cart.items, address: cart.address },
+    success:     true,
+    message:     responseMessage,
+    cart:        { items: cart.items, totalAmount: cart.totalAmount, address: cart.address },
+    parsed:      { items: cart.items, address: cart.address },
     totalAmount: cart.totalAmount,
     aiLogic: {
-      parsedItems: cart.items,
-      addressSource: hasAddressInMessage ? 'message' : (userDoc?.defaultAddress ? 'profile' : 'not_provided'),
-      confidence: 100,
-      recommendedAction: 'Proceed to payment',
-    }
+      parsedItems:       resolvedItems,
+      addressSource,
+      confidence:        intent.source === 'ai' ? 95 : 75,
+      recommendedAction: cart.address !== 'Address Pending' ? 'Proceed to payment' : 'Provide delivery address',
+      intentSource:      intent.source,
+      notFound:          notFound.length > 0 ? notFound : undefined,
+    },
   });
 });
-
-// =============================================================================
-// GET /products/search?q=rice&limit=5
-// Public-ish (still needs auth so we can audit) — autocomplete search
-// =============================================================================
-router.get('/products/search', auth, async (req, res) => {
-  try {
-    const q         = (req.query.q || '').trim();
-    const limit     = Math.min(parseInt(req.query.limit) || 5, 20);
-    const byCategory = req.query.category === 'true';
-
-    if (!q) {
-      return res.json({ success: true, products: [] });
-    }
-
-    let products;
-
-    if (byCategory) {
-      // Exact category match, sorted by price ascending
-      products = await Product.find(
-        { category: { $regex: q, $options: 'i' } },
-        'name price category'
-      ).sort({ price: 1 }).limit(limit).lean();
-    } else {
-      // Try MongoDB text search first (fastest)
-      try {
-        products = await Product.find(
-          { $text: { $search: q } },
-          { score: { $meta: 'textScore' }, name: 1, price: 1, category: 1 }
-        ).sort({ score: { $meta: 'textScore' } }).limit(limit).lean();
-      } catch {
-        products = [];
-      }
-
-      // Fallback: regex on name field
-      if (!products || products.length === 0) {
-        products = await Product.find(
-          { name: { $regex: q, $options: 'i' } },
-          'name price category'
-        ).limit(limit).lean();
-      }
-    }
-
-    res.json({
-      success: true,
-      products: (products || []).map(p => ({
-        id:       p._id,
-        name:     p.name,
-        price:    p.price,
-        category: p.category,
-      })),
-    });
-  } catch (err) {
-    console.error('[PRODUCT SEARCH]', err.message);
-    res.status(500).json({ success: false, error: 'Search failed' });
-  }
-});
-
-
 
 // =============================================================================
 // POST /verify-payment
@@ -583,6 +771,10 @@ router.get('/products/search', auth, async (req, res) => {
 router.post('/verify-payment', auth, async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ success: false, error: 'Missing payment parameters' });
+    }
 
     const expected = crypto
       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
@@ -594,13 +786,16 @@ router.post('/verify-payment', auth, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid payment signature' });
     }
 
-    const order = await Order.findOne({ razorpayOrderId: razorpay_order_id }) || (req.body.orderId ? await Order.findById(req.body.orderId) : null);
+    const order = await Order.findOne({ razorpayOrderId: razorpay_order_id })
+                || (req.body.orderId ? await Order.findById(req.body.orderId) : null);
+
     if (!order) return res.status(404).json({ error: 'Order not found' });
 
+    // Idempotent: if already paid, return success without re-processing
     if (order.status === 'PAID') {
       return res.json({
-        success: true,
-        message: 'Payment already recorded',
+        success:   true,
+        message:   'Payment already recorded.',
         duplicate: true,
         receipt: {
           orderId:           order._id.toString(),
@@ -609,7 +804,7 @@ router.post('/verify-payment', auth, async (req, res) => {
           totalAmount:       order.totalAmount,
           address:           order.address,
           paidAt:            order.updatedAt ? order.updatedAt.toISOString() : new Date().toISOString(),
-        }
+        },
       });
     }
 
@@ -619,13 +814,14 @@ router.post('/verify-payment', auth, async (req, res) => {
     await order.save();
 
     await audit(order.userId, 'PAYMENT_CAPTURED', 'SUCCESS',
-      razorpay_payment_id, `Order ${order._id} paid ₹${order.totalAmount}`,
+      razorpay_payment_id,
+      `Order ${order._id} paid ₹${order.totalAmount}`,
       { orderId: order._id, total: order.totalAmount }
     );
 
     res.json({
       success: true,
-      message: 'Payment verified successfully',
+      message: 'Payment verified.',
       receipt: {
         orderId:           order._id.toString(),
         razorpayPaymentId: razorpay_payment_id,
@@ -642,31 +838,30 @@ router.post('/verify-payment', auth, async (req, res) => {
 });
 
 // =============================================================================
-// POST /retry-payment
+// POST /retry-payment — max 3 retries, bounded
 // =============================================================================
 router.post('/retry-payment', auth, async (req, res) => {
   try {
     const { orderId } = req.body;
+    if (!orderId) return res.status(400).json({ error: 'orderId required' });
+
     const order = await Order.findById(orderId);
     if (!order) return res.status(404).json({ error: 'Order not found' });
     if (order.userId.toString() !== req.user.userId)
       return res.status(403).json({ error: 'Unauthorized' });
-
+    if (order.status === 'PAID')
+      return res.status(400).json({ error: 'This order is already paid.' });
     if ((order.retryCount || 0) >= 3) {
       return res.status(400).json({
-        error: 'Maximum retry attempts (3) reached. Please start a new order.',
+        error:            'Maximum retry attempts (3) reached. Please start a new order.',
         maxRetriesReached: true,
       });
-    }
-
-    if (order.status === 'PAID') {
-      return res.status(400).json({ error: 'This order is already paid.' });
     }
 
     const rzpOrder = await razorpay.orders.create({
       amount:   order.totalAmount * 100,
       currency: 'INR',
-      receipt:  `retry${(order.retryCount || 0) + 1}_${order._id}`,
+      receipt:  `retry${(order.retryCount || 0) + 1}_${order._id.toString().slice(-8)}`,
       notes:    { orderId: order._id.toString(), userId: req.user.userId, retry: 'true' },
     });
 
@@ -677,7 +872,8 @@ router.post('/retry-payment', auth, async (req, res) => {
     await order.save();
 
     await audit(order.userId, 'PAYMENT_RETRY', 'INFO',
-      `Retry #${order.retryCount}`, `New rzpOrderId: ${rzpOrder.id}`,
+      `Retry #${order.retryCount}`,
+      `New rzpOrderId: ${rzpOrder.id}`,
       { orderId: order._id, retryCount: order.retryCount }
     );
 
@@ -696,13 +892,13 @@ router.post('/retry-payment', auth, async (req, res) => {
 });
 
 // =============================================================================
-// GET /orders/me
+// GET /orders/me — order history (excludes in-progress carts)
 // =============================================================================
 router.get('/orders/me', auth, async (req, res) => {
   try {
     const orders = await Order.find({
       userId: req.user.userId,
-      status: { $nin: ['CART'] },          // exclude in-progress carts
+      status: { $nin: ['CART'] },
     }).sort({ createdAt: -1 }).lean();
     res.json({ success: true, orders });
   } catch (err) {
@@ -712,7 +908,7 @@ router.get('/orders/me', auth, async (req, res) => {
 });
 
 // =============================================================================
-// POST /webhook — Razorpay webhook (raw body required)
+// POST /webhook — Razorpay payment events
 // =============================================================================
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   try {
@@ -730,7 +926,8 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 
     if (event.event === 'payment.captured') {
       const payment = event.payload.payment.entity;
-      const order = await Order.findOne({ razorpayOrderId: payment.order_id }) || await Order.findById(payment.notes?.orderId);
+      const order   = await Order.findOne({ razorpayOrderId: payment.order_id })
+                   || await Order.findById(payment.notes?.orderId);
       if (order && order.status !== 'PAID') {
         order.razorpayPaymentId = payment.id;
         order.status            = 'PAID';
@@ -742,8 +939,9 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 
     if (event.event === 'payment.failed') {
       const payment = event.payload.payment.entity;
-      const order = await Order.findOne({ razorpayOrderId: payment.order_id }) || await Order.findById(payment.notes?.orderId);
-      if (order) {
+      const order   = await Order.findOne({ razorpayOrderId: payment.order_id })
+                   || await Order.findById(payment.notes?.orderId);
+      if (order && order.status !== 'PAID') {
         order.status    = 'FAILED';
         order.updatedAt = new Date();
         await order.save();
@@ -756,40 +954,6 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   } catch (err) {
     console.error('[WEBHOOK]', err.message);
     res.status(500).json({ error: 'Webhook error' });
-  }
-});
-
-// =============================================================================
-// POST /create-razorpay-order (alternative endpoint)
-// =============================================================================
-router.post('/create-razorpay-order', auth, async (req, res) => {
-  try {
-    const { orderId } = req.body;
-    const order = await Order.findById(orderId);
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    if (order.userId.toString() !== req.user.userId)
-      return res.status(403).json({ error: 'Unauthorized' });
-
-    const rzpOrder = await razorpay.orders.create({
-      amount:   order.totalAmount * 100,
-      currency: 'INR',
-      receipt:  order._id.toString(),
-      notes:    { orderId: order._id.toString(), userId: req.user.userId },
-    });
-
-    order.razorpayOrderId = rzpOrder.id;
-    order.status          = 'ORDER_CREATED';
-    await order.save();
-
-    res.json({
-      razorpayOrderId: rzpOrder.id,
-      amount:          order.totalAmount,
-      currency:        'INR',
-      keyId:           process.env.RAZORPAY_KEY_ID,
-    });
-  } catch (err) {
-    console.error('[CREATE-RZP]', err.message);
-    res.status(500).json({ error: 'Failed to create Razorpay order' });
   }
 });
 
