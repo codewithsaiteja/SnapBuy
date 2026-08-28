@@ -1,0 +1,172 @@
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.login-card {
+  background: white;
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  width: 100%;
+  max-width: 450px;
+}
+
+.login-card h1 {
+  font-size: 2.5rem;
+  text-align: center;
+  margin-bottom: 10px;
+  color: #667eea;
+}
+
+.login-card h2 {
+  font-size: 1.8rem;
+  text-align: center;
+  margin-bottom: 30px;
+  color: #333;
+}
+
+.error-message {
+  background: #fee;
+  color: #c00;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  color: #555;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 12px 15px;
+  border: 2px solid #ddd;
+  border-radius: 10px;
+  font-size: 1rem;
+  transition: border-color 0.3s;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.submit-btn {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  margin-top: 10px;
+}
+
+.submit-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+}
+
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.toggle-text {
+  text-align: center;
+  margin-top: 20px;
+  color: #666;
+  font-size: 0.95rem;
+}
+
+.toggle-text span {
+  color: #667eea;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.toggle-text span:hover {
+  color: #764ba2;
+}
+
+/* --- Password field with eye toggle --- */
+.password-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-wrapper input {
+  padding-right: 48px; /* room for the eye button */
+}
+
+.eye-toggle {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 0;
+  line-height: 1;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.eye-toggle:hover {
+  opacity: 1;
+}
+
+/* --- Password strength meter --- */
+.strength-container {
+  margin-top: 8px;
+}
+
+.strength-bar-track {
+  height: 6px;
+  background: #e0e0e0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.strength-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.strength-label {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.strength-suggestion {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #fff8e1;
+  border-left: 3px solid #fb8c00;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: #555;
+  line-height: 1.5;
+}

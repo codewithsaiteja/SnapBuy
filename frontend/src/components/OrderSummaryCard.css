@@ -1,0 +1,234 @@
+/* =============================================================================
+   OrderSummaryCard.css
+   Screenshot spec: white card, green header, item rows, gray divider,
+   TOTAL row, gray address pill, full-width blue pay button.
+============================================================================= */
+
+/* ── Card shell ─────────────────────────────────────────────────────────── */
+.osc-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.08),
+    0 1px 4px  rgba(0, 0, 0, 0.05);
+  width: 340px;
+  max-width: 88vw;
+  overflow: hidden;
+  /* Slide-up entrance on mount */
+  animation: oscIn 0.26s cubic-bezier(0.34, 1.46, 0.64, 1);
+}
+
+@keyframes oscIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)     scale(1);    }
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+/*
+  Screenshot: light green background band, checkmark icon, "Order Ready to Pay" text.
+*/
+.osc-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border-bottom: 1px solid #bbf7d0;
+}
+
+.osc-header-check {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.osc-header-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #15803d;
+  letter-spacing: -0.01em;
+}
+
+/* ── Items list ─────────────────────────────────────────────────────────── */
+/*
+  Screenshot: each row has item name + "× qty" on left, price on right.
+  Rows separated by a very light rule.
+*/
+.osc-items {
+  padding: 2px 18px 0;
+}
+
+.osc-empty {
+  padding: 14px 0;
+  font-size: 0.85rem;
+  color: #94a3b8;
+  text-align: center;
+  margin: 0;
+}
+
+.osc-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px solid #f1f5f9;
+  gap: 12px;
+}
+
+/* No divider after the last item — the .osc-divider below handles it */
+.osc-item-row:last-child {
+  border-bottom: none;
+}
+
+.osc-item-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "× qty" is slightly dimmer */
+.osc-item-qty {
+  font-weight: 400;
+  color: #64748b;
+}
+
+/* Price — right-aligned, gray as per screenshot */
+.osc-item-price {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #64748b;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Divider ────────────────────────────────────────────────────────────── */
+/* Screenshot: single thin horizontal rule between items and TOTAL */
+.osc-divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 0 18px;
+}
+
+/* ── Total row ──────────────────────────────────────────────────────────── */
+/*
+  Screenshot: "TOTAL" label (small caps, gray) on left,
+              large bold amount on right.
+*/
+.osc-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 12px 18px;
+  background: #f8fafc;
+}
+
+.osc-total-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.osc-total-amount {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+/* ── Address badge ──────────────────────────────────────────────────────── */
+/*
+  Screenshot: small gray pill with location pin icon and address text.
+*/
+.osc-address {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 18px 12px;
+  padding: 7px 12px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 9999px;          /* pill shape */
+  min-height: 0;
+}
+
+.osc-address-icon {
+  flex-shrink: 0;
+  color: #64748b;
+}
+
+.osc-address-text {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #475569;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Pay Now button wrapper + button ────────────────────────────────────── */
+.osc-pay-wrap {
+  padding: 0 18px 18px;
+}
+
+.osc-pay-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  padding: 14px 20px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 9999px;          /* full pill — matches screenshot */
+  font-size: 0.97rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  transition:
+    background 0.15s ease,
+    transform  0.12s ease,
+    box-shadow 0.15s ease;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.38);
+}
+
+.osc-pay-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.48);
+}
+
+.osc-pay-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.32);
+}
+
+.osc-pay-btn:disabled {
+  background: #93c5fd;
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+  opacity: 0.75;
+}
+
+/* Spinner shown while Razorpay modal is loading */
+.osc-pay-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: oscSpin 0.6s linear infinite;
+}
+
+@keyframes oscSpin {
+  to { transform: rotate(360deg); }
+}

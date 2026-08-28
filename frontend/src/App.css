@@ -1,0 +1,25 @@
+/* App.css — layout shell used by pages that sit under the Navbar */
+
+/* Page wrapper pushed below fixed navbar */
+.page-under-nav {
+  padding-top: var(--navbar-h);
+  min-height: 100dvh;
+  background: var(--bg);
+}
+
+/* Centered content container */
+.page-content {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 24px;
+}
+
+/* Auth pages don't use the navbar — full-page centered card */
+.page-auth {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 24px;
+}
