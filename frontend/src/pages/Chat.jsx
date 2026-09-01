@@ -545,31 +545,34 @@ export default function Chat() {
   const [cartActionLoading, setCartActionLoading] = useState({});
 
   const directCartAction = useCallback(async (productName, delta) => {
-    // delta: positive = add, negative = remove, 0 = remove entirely
+    // delta: +1 = add one, -1 = remove one (goes to 0 = deleted from cart)
     const key = productName;
     setCartActionLoading(prev => ({ ...prev, [key]: true }));
     try {
       if (delta > 0) {
+        // Always use /cart/add for increments — backend does existing.qty += qty
         const { data } = await api.post(`${API}/cart/add`, { productName, qty: delta });
         if (data.success && data.cart) setCart(data.cart);
         else if (!data.success) showToast(data.message || 'Could not add item.');
       } else {
-        // Find current qty and decrement, or remove if reaching 0
+        // Decrement: read current qty from local cart state (no extra GET needed)
         setCart(prev => {
-          if (!prev) return prev;
-          const item = prev.items?.find(i => i.name.toLowerCase() === productName.toLowerCase());
-          const newQty = (item?.qty || 0) + delta; // delta is negative here
-          // Fire the API update asynchronously; optimistic UI via separate call below
-          return prev;
+          // Find item case-insensitively (same logic backend uses)
+          const item = prev?.items?.find(
+            i => i.name.toLowerCase() === productName.toLowerCase()
+          );
+          const currentQty = item?.qty || 0;
+          const newQty = Math.max(0, currentQty + delta); // delta is -1 here
+          // Fire API call asynchronously; state will be updated from response
+          api.post(`${API}/cart/update`, { productName, qty: newQty })
+            .then(({ data }) => {
+              if (data.success !== false) {
+                setCart(data.cart ?? null);
+              }
+            })
+            .catch(err => showToast(err.userMessage || 'Cart update failed.'));
+          return prev; // keep existing state until API responds
         });
-        // Use cart/update endpoint: qty 0 removes the item
-        const currentCart = await api.get(`${API}/cart`);
-        const item = currentCart?.data?.cart?.items?.find(
-          i => i.name.toLowerCase() === productName.toLowerCase()
-        );
-        const newQty = Math.max(0, (item?.qty || 0) + delta);
-        const { data } = await api.post(`${API}/cart/update`, { productName, qty: newQty });
-        if (data.success) setCart(data.cart);
       }
     } catch (err) {
       showToast(err.userMessage || 'Cart update failed. Please try again.');
@@ -882,7 +885,9 @@ export default function Chat() {
                     {msg.items?.length > 0 ? (
                       <div className="category-result-grid">
                         {msg.items.map((p) => {
-                          const cartItem = cart?.items?.find(i => i.name === p.name);
+                          const cartItem = cart?.items?.find(
+                            i => i.name.toLowerCase() === p.name.toLowerCase()
+                          );
                           return (
                           <div key={p.id} className="category-result-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '1rem', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
                             <div className="category-result-card__name" style={{ fontWeight: '600' }}>{p.name}</div>
