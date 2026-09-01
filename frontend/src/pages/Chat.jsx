@@ -540,6 +540,44 @@ export default function Chat() {
     }
   }
 
+  // ── Direct cart action — bypasses chat entirely ──────────────────────────
+  // Used by product-card Add / + / – buttons so they never create a chat bubble
+  const [cartActionLoading, setCartActionLoading] = useState({});
+
+  const directCartAction = useCallback(async (productName, delta) => {
+    // delta: positive = add, negative = remove, 0 = remove entirely
+    const key = productName;
+    setCartActionLoading(prev => ({ ...prev, [key]: true }));
+    try {
+      if (delta > 0) {
+        const { data } = await api.post(`${API}/cart/add`, { productName, qty: delta });
+        if (data.success && data.cart) setCart(data.cart);
+        else if (!data.success) showToast(data.message || 'Could not add item.');
+      } else {
+        // Find current qty and decrement, or remove if reaching 0
+        setCart(prev => {
+          if (!prev) return prev;
+          const item = prev.items?.find(i => i.name.toLowerCase() === productName.toLowerCase());
+          const newQty = (item?.qty || 0) + delta; // delta is negative here
+          // Fire the API update asynchronously; optimistic UI via separate call below
+          return prev;
+        });
+        // Use cart/update endpoint: qty 0 removes the item
+        const currentCart = await api.get(`${API}/cart`);
+        const item = currentCart?.data?.cart?.items?.find(
+          i => i.name.toLowerCase() === productName.toLowerCase()
+        );
+        const newQty = Math.max(0, (item?.qty || 0) + delta);
+        const { data } = await api.post(`${API}/cart/update`, { productName, qty: newQty });
+        if (data.success) setCart(data.cart);
+      }
+    } catch (err) {
+      showToast(err.userMessage || 'Cart update failed. Please try again.');
+    } finally {
+      setCartActionLoading(prev => ({ ...prev, [key]: false }));
+    }
+  }, [showToast]);
+
   // ── Core send handler — ALL existing logic preserved exactly ─────────────
   const sendMessage = useCallback(async (text) => {
     const trimmed = (text || '').trim();
@@ -626,7 +664,7 @@ export default function Chat() {
           : err.response?.data?.error || 'Request failed. Please try again.'
       );
     }
-  }, [isTyping, awaitingAddress, pendingItems, addMsg, showToast, finalizeCart]);
+  }, [isTyping, awaitingAddress, pendingItems, addMsg, showToast]);
 
   // ── Payment handler — unchanged ──────────────────────────────────────────
   const handlePay = useCallback(async (razorpayOrderId, amount, orderId) => {
@@ -851,13 +889,22 @@ export default function Chat() {
                             <div className="category-result-card__price" style={{ color: '#2563eb', fontWeight: '500' }}>₹{p.price}</div>
                             {cartItem ? (
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', marginTop: 'auto' }}>
-                                <button onClick={() => sendMessage(`remove 1 ${p.name}`)} style={{ padding: '0.25rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>-</button>
+                                <button
+                                  onClick={() => directCartAction(p.name, -1)}
+                                  disabled={cartActionLoading[p.name]}
+                                  style={{ padding: '0.25rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>-</button>
                                 <span>{cartItem.qty}</span>
-                                <button onClick={() => sendMessage(`add 1 ${p.name}`)} style={{ padding: '0.25rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>+</button>
+                                <button
+                                  onClick={() => directCartAction(p.name, 1)}
+                                  disabled={cartActionLoading[p.name]}
+                                  style={{ padding: '0.25rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>+</button>
                               </div>
                             ) : (
-                              <button onClick={() => sendMessage(`Add 1 ${p.name}`)} style={{ marginTop: 'auto', background: '#2563eb', color: '#fff', border: 'none', padding: '0.5rem', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>
-                                Add to Cart
+                              <button
+                                onClick={() => directCartAction(p.name, 1)}
+                                disabled={cartActionLoading[p.name]}
+                                style={{ marginTop: 'auto', background: cartActionLoading[p.name] ? '#93c5fd' : '#2563eb', color: '#fff', border: 'none', padding: '0.5rem', borderRadius: '6px', cursor: cartActionLoading[p.name] ? 'not-allowed' : 'pointer', fontWeight: '500' }}>
+                                {cartActionLoading[p.name] ? 'Adding…' : 'Add to Cart'}
                               </button>
                             )}
                           </div>
