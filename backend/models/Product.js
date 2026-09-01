@@ -1,9 +1,24 @@
 const mongoose = require('mongoose');
 
 const ProductSchema = new mongoose.Schema({
+  id: {
+    type: Number,
+    unique: true,
+    sparse: true,
+  },
+  sku: {
+    type: String,
+    default: '',
+    trim: true,
+  },
   name: {
     type: String,
     required: true,
+    trim: true,
+  },
+  brand: {
+    type: String,
+    default: '',
     trim: true,
   },
   price: {
@@ -11,6 +26,10 @@ const ProductSchema = new mongoose.Schema({
     required: true,
   },
   originalPrice: {
+    type: Number,
+    default: 0,
+  },
+  discountPercentage: {
     type: Number,
     default: 0,
   },
@@ -28,6 +47,16 @@ const ProductSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  unit: {
+    type: String,
+    default: 'piece',
+    trim: true,
+  },
+  weightOrSize: {
+    type: String,
+    default: '',
+    trim: true,
+  },
   // image field (used by existing order references)
   image: {
     type: String,
@@ -42,8 +71,17 @@ const ProductSchema = new mongoose.Schema({
     type: [String],
     default: [],
   },
+  keywords: {
+    type: [String],
+    default: [],
+  },
   // Target audience chips (student, developer, professional, office, remote)
   targetAudience: {
+    type: [String],
+    default: [],
+  },
+  // Labels/badges (e.g. "Best Seller", "Popular", "New", "Fresh", "Daily Essential")
+  labels: {
     type: [String],
     default: [],
   },
@@ -56,14 +94,17 @@ const ProductSchema = new mongoose.Schema({
     type: Number,
     default: 100,
   },
-  sku: {
-    type: String,
-    default: '',
-    trim: true,
+  availability: {
+    type: Boolean,
+    default: true,
   },
   rating: {
     type: Number,
     default: 4.0,
+  },
+  reviewCount: {
+    type: Number,
+    default: 0,
   },
   reviews: {
     type: Number,
@@ -80,5 +121,6 @@ ProductSchema.index({ name: 'text', subcategory: 'text', category: 'text', tags:
 ProductSchema.index({ category: 1 });
 ProductSchema.index({ subcategory: 1 });
 ProductSchema.index({ targetAudience: 1 });
+ProductSchema.index({ id: 1 });
 
 module.exports = mongoose.model('Product', ProductSchema);

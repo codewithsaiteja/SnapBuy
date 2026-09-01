@@ -611,7 +611,7 @@ export default function Chat() {
         }
         addMsg('user', trimmed);
         addMsg('ai', 'Great! Here is your order summary. You can review and pay.');
-        addMsg('order-card', '', { orderData: activeCart });
+        addMsg('order-card', '', {}); // orderData read from live cart state at render time
         return;
       }
     }
@@ -654,11 +654,10 @@ export default function Chat() {
       if (data.showCheckout) {
         setAwaitingAddress(false);
         setPendingItems([]);
+        // Update live cart state FIRST, then render order-card which reads from it
+        if (data.cart !== undefined) setCart(data.cart);
         addMsg('ai', data.message, { aiLogic: data.aiLogic });
-        addMsg('order-card', '', {
-          orderData: data.cart,
-          aiLogic: data.aiLogic,
-        });
+        addMsg('order-card', '', { aiLogic: data.aiLogic }); // reads live cart at render time
         return;
       }
       
@@ -879,7 +878,15 @@ export default function Chat() {
               );
               if (msg.type === 'order-card') return (
                 <div key={msg.id} className="msg msg--ai">
-                  <OrderSummaryCard orderData={msg.orderData} onPay={finalizeCart} onCartUpdate={setCart} processing={isPaying} />
+                  {/* Always use live cart state so qty/total stays in sync.
+                      Fall back to the frozen msg.orderData snapshot only when
+                      cart hasn't been loaded yet. */}
+                  <OrderSummaryCard
+                    orderData={cart || msg.orderData}
+                    onPay={finalizeCart}
+                    onCartUpdate={setCart}
+                    processing={isPaying}
+                  />
                   {msg.aiLogic && <AILogicPanel data={msg.aiLogic} />}
                 </div>
               );
