@@ -143,23 +143,24 @@
 
 /* ── Address badge ──────────────────────────────────────────────────────── */
 /*
-  Screenshot: small gray pill with location pin icon and address text.
+  Premium gray pill with location pin icon and address text.
 */
 .osc-address {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 0 18px 12px;
-  padding: 7px 12px;
+  gap: 8px;
+  margin: 12px 18px;
+  padding: 10px 14px;
   background: #f1f5f9;
   border: 1px solid #e2e8f0;
-  border-radius: 9999px;          /* pill shape */
-  min-height: 0;
+  border-radius: 20px;            /* pill shape */
 }
 
 .osc-address-icon {
   flex-shrink: 0;
   color: #64748b;
+  width: 14px;
+  height: 14px;
 }
 
 .osc-address-text {
@@ -173,21 +174,21 @@
 
 /* ── Pay Now button wrapper + button ────────────────────────────────────── */
 .osc-pay-wrap {
-  padding: 0 18px 18px;
+  padding: 12px 18px 18px;
 }
 
 .osc-pay-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
   width: 100%;
-  padding: 14px 20px;
+  padding: 12px 20px;
   background: #2563eb;
   color: #ffffff;
   border: none;
-  border-radius: 9999px;          /* full pill — matches screenshot */
-  font-size: 0.97rem;
+  border-radius: 20px;            /* pill shape */
+  font-size: 0.95rem;
   font-weight: 700;
   font-family: inherit;
   cursor: pointer;
@@ -216,6 +217,270 @@
   cursor: not-allowed;
   transform: none;
   opacity: 0.75;
+}
+
+/* ── Item layout with left/qty/price ────────────────────────────────────── */
+.osc-item-left {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.osc-item-unit-price {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #94a3b8;
+}
+
+.osc-item-qty-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: #f1f5f9;
+  border-radius: 6px;
+  padding: 4px 6px;
+  flex-shrink: 0;
+}
+
+.osc-qty-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #475569;
+  transition: color 0.15s, background 0.15s;
+  border-radius: 4px;
+  padding: 0;
+}
+
+.osc-qty-btn:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.osc-qty-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.osc-qty-btn--add {
+  color: #2563eb;
+}
+
+.osc-qty-btn--add:hover:not(:disabled) {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.osc-qty-value {
+  min-width: 18px;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+/* ── Coupon section ────────────────────────────────────────────────────────── */
+.osc-coupon-section {
+  padding: 12px 18px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.osc-coupon-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.osc-coupon-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-family: inherit;
+  color: #1e293b;
+  background: #ffffff;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+.osc-coupon-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.osc-coupon-input::placeholder {
+  color: #cbd5e1;
+}
+
+.osc-coupon-apply-btn {
+  padding: 8px 16px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.osc-coupon-apply-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.osc-coupon-apply-btn:disabled {
+  background: #cbd5e1;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.osc-spin {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: oscSpin 0.6s linear infinite;
+}
+
+.osc-coupon-applied {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+}
+
+.osc-coupon-applied__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.osc-coupon-applied__code {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #15803d;
+  white-space: nowrap;
+}
+
+.osc-coupon-applied__msg {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #22863a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.osc-coupon-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: none;
+  border: none;
+  color: #16a34a;
+  cursor: pointer;
+  transition: color 0.15s;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.osc-coupon-remove:hover {
+  color: #15803d;
+}
+
+.osc-coupon-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: #dc2626;
+}
+
+/* ── Price breakdown ────────────────────────────────────────────────────────── */
+.osc-breakdown {
+  padding: 0 18px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.osc-breakdown__divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 11px 0;
+}
+
+.osc-breakdown__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #475569;
+  gap: 12px;
+}
+
+.osc-breakdown__row span:last-child {
+  text-align: right;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.osc-breakdown__row--discount {
+  color: #16a34a;
+}
+
+.osc-breakdown__row--discount span:last-child {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.osc-breakdown__coupon-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  background: rgba(22, 163, 74, 0.1);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #16a34a;
+}
+
+.osc-breakdown__row--total {
+  padding-top: 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+  border-top: 1px solid #e2e8f0;
+  margin-top: 3px;
+}
+
+.osc-breakdown__row--total span:last-child {
+  font-size: 1.1rem;
 }
 
 /* Spinner shown while Razorpay modal is loading */

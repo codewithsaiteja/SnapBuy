@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { triggerRazorpay } from '../utils/razorpay';
 import OrderSummaryCard from '../components/OrderSummaryCard';
 import PaymentSuccess from '../components/PaymentSuccess';
+import TrackingModal from '../components/TrackingModal';
+import Navbar from '../components/Navbar';
 import './Chat.css';
 
 const API = '/api';
@@ -102,7 +104,7 @@ function SuggestionChips({ suggestions, onSelect }) {
       <span className="suggestion-chips__label">Try one of these:</span>
       <div className="suggestion-chips__list">
         {suggestions.map(s => (
-          <button key={s} className="suggestion-chip" onClick={() => onSelect(`Buy 1 ${s}`)}>
+          <button key={s} className="suggestion-chip" onClick={() => onSelect(s)}>
             {s}
           </button>
         ))}
@@ -111,14 +113,26 @@ function SuggestionChips({ suggestions, onSelect }) {
   );
 }
 
-function RetryCard({ orderId, amount, onRetry, onDismiss, processing }) {
+function RetryCard({ orderId, amount, onRetry, onDismiss, onCancel, processing }) {
   return (
     <div className="retry-card">
-      <span>Payment was not completed.</span>
-      <button className="retry-card__btn" onClick={() => onRetry(orderId, amount)} disabled={processing}>
-        {processing ? 'Retrying…' : 'Retry Payment'}
-      </button>
-      <button className="retry-card__skip" onClick={onDismiss}>Dismiss</button>
+      <div className="retry-card__header">
+        <svg viewBox="0 0 24 24" width="16" height="16" stroke="#dc2626" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span>Payment was not completed.</span>
+      </div>
+      <div className="retry-card__actions">
+        <button className="retry-card__btn retry-card__btn--primary" onClick={() => onRetry(orderId, amount)} disabled={processing}>
+          {processing ? 'Processing…' : 'Retry Payment'}
+        </button>
+        <button className="retry-card__btn retry-card__btn--secondary" onClick={() => onRetry(orderId, amount)} disabled={processing}>
+          Change Payment Method
+        </button>
+        <button className="retry-card__btn retry-card__btn--ghost" onClick={onCancel || onDismiss}>
+          Cancel Order
+        </button>
+      </div>
     </div>
   );
 }
@@ -430,10 +444,33 @@ export default function Chat() {
   const [pendingItems,    setPendingItems]    = useState([]);
   const [receipt,         setReceipt]         = useState(null);
   const [cart,            setCart]            = useState(null);
+  const [trackingOrderId, setTrackingOrderId] = useState(null);
+  const [showCartDrawer, setShowCartDrawer] = useState(false);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+
+  const updateCartItem = useCallback((newCart) => setCart(newCart), []);
+
+  const speakText = (text) => {
+    try {
+      const prefs = JSON.parse(localStorage.getItem('voicePrefs') || '{"ttsEnabled":true}');
+      if (!prefs.ttsEnabled || !window.speechSynthesis) return;
+      window.speechSynthesis.cancel();
+      const msg = new SpeechSynthesisUtterance(text.replace(/<[^>]+>/g, ''));
+      const selectedVoiceName = localStorage.getItem('selectedVoice') || 'Google UK English Female';
+      const voices = window.speechSynthesis.getVoices();
+      if (voices && voices.length > 0) {
+        const found = voices.find(v => v.name === selectedVoiceName) || voices.find(v => v.lang.startsWith('en'));
+        if (found) msg.voice = found;
+      }
+      window.speechSynthesis.speak(msg);
+    } catch(e) {}
+  };
 
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const inputRef       = useRef(null);
   const navigate       = useNavigate();
+  const location       = useLocation();
 
   const user         = (() => { try { return JSON.parse(localStorage.getItem('user') || '{}'); } catch { return {}; } })();
   const avatarLetter = (user.name || user.email || 'U')[0].toUpperCase();
@@ -446,14 +483,38 @@ export default function Chat() {
       .catch(() => {});
   }, []);
 
-  // Auto-scroll
+  // Handle search query navigated from Navbar
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (location.state?.searchQuery) {
+      const q = location.state.searchQuery;
+      // Clear the state so back-navigation doesn't re-trigger
+      window.history.replaceState({}, document.title);
+      // Small delay so chat is mounted
+      setTimeout(() => sendMessage(q), 200);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state?.searchQuery]);
+
+  // Scroll handler to detect if user is near bottom
+  const handleScroll = (e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.target;
+    // Considered "near bottom" if within 150px of the bottom
+    setIsNearBottom(scrollHeight - scrollTop - clientHeight < 150);
+  };
+
+  // Smart Auto-scroll
+  useEffect(() => {
+    if (isNearBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages, isTyping]);
 
   const showToast = useCallback((msg, type = 'error') => setToast({ msg, type }), []);
 
   const addMsg = useCallback((type, content, extra = {}) => {
+    if ((type === 'ai' || type === 'payment-success') && content) {
+      speakText(content);
+    }
     setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random()}`, type, content, ...extra }]);
   }, []);
 
@@ -467,13 +528,56 @@ export default function Chat() {
     navigate('/login');
   };
 
+  async function finalizeCart() {
+    setIsPaying(true);
+    try {
+      const { data } = await axios.post(`${API}/cart/finalize`);
+      if (data.success) { setCart(null); await handlePay(data.razorpayOrderId, data.totalAmount, data.orderId); }
+    } catch (err) {
+      setIsPaying(false);
+      if (err.response?.data?.addressRequired) {
+        setAwaitingAddress(true);
+        if (cart) setPendingItems(cart.items);
+        addMsg('ai', 'Delivery address is required. Please type your delivery address below to complete the order.');
+      } else {
+        showToast(err.response?.data?.error || 'Failed to finalize cart. Please try again.');
+      }
+    }
+  }
+
   // ── Core send handler — ALL existing logic preserved exactly ─────────────
   const sendMessage = useCallback(async (text) => {
     const trimmed = (text || '').trim();
     if (!trimmed || isTyping) return;
     inputRef.current?.focus();
+
+    // ── Checkout intent — user says "no", "that's all", "checkout", "proceed", "done"
+    const checkoutTriggers = /^(no|nope|that'?s? all|done|checkout|check out|proceed|proceed to (payment|checkout)|i'?m done|pay now|finalize)$/i;
+    if (!awaitingAddress && checkoutTriggers.test(trimmed)) {
+      const cartCheck = await axios.get(`${API}/cart`).catch(() => null);
+      const activeCart = cartCheck?.data?.cart;
+      if (activeCart && activeCart.items?.length > 0) {
+        if (!activeCart.address || activeCart.address === 'Address Pending') {
+           setAwaitingAddress(true);
+           setPendingItems(activeCart.items);
+           addMsg('user', trimmed);
+           addMsg('ai', 'Delivery address is required. Please type your delivery address below to complete the order.');
+           return;
+        }
+        addMsg('user', trimmed);
+        addMsg('ai', 'Great! Here is your order summary. You can review and pay.');
+        addMsg('order-card', '', { orderData: activeCart });
+        return;
+      }
+    }
+
     addMsg('user', trimmed);
     setIsTyping(true);
+    // Force scroll to bottom immediately when user sends a message
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 50);
+
     try {
       const body = awaitingAddress
         ? { message: trimmed, isAddress: true, pendingItems }
@@ -489,7 +593,11 @@ export default function Chat() {
       }
       if (data.isInvalid) {
         addMsg('ai', data.message);
-        if (data.suggestions?.length) addMsg('suggestions', '', { suggestions: data.suggestions });
+        if (data.alternatives?.length) {
+          addMsg('suggestions', '', { suggestions: data.alternatives });
+        } else if (data.suggestions?.length) {
+          addMsg('suggestions', '', { suggestions: data.suggestions });
+        }
         return;
       }
       if (data.addressRequired) {
@@ -498,20 +606,22 @@ export default function Chat() {
         addMsg('ai', data.message);
         return;
       }
-      if (data.razorpayOrderId) {
+      if (data.showCheckout) {
         setAwaitingAddress(false);
         setPendingItems([]);
         addMsg('ai', data.message, { aiLogic: data.aiLogic });
         addMsg('order-card', '', {
-          orderData: {
-            orderId: data.orderId, razorpayOrderId: data.razorpayOrderId,
-            items: data.parsed?.items || [], totalAmount: data.totalAmount,
-            address: data.parsed?.address || '', isEdit: data.isEdit,
-          },
+          orderData: data.cart,
           aiLogic: data.aiLogic,
         });
         return;
       }
+      
+      if (data.items && data.items.length > 0) {
+        addMsg('category-result', data.message, { items: data.items, aiLogic: data.aiLogic });
+        return;
+      }
+      
       addMsg('ai', data.message || 'Done.', { aiLogic: data.aiLogic });
     } catch (err) {
       setIsTyping(false);
@@ -521,7 +631,7 @@ export default function Chat() {
           : err.response?.data?.error || 'Request failed. Please try again.'
       );
     }
-  }, [isTyping, awaitingAddress, pendingItems, addMsg, showToast]);
+  }, [isTyping, awaitingAddress, pendingItems, addMsg, showToast, finalizeCart]);
 
   // ── Payment handler — unchanged ──────────────────────────────────────────
   const handlePay = useCallback(async (razorpayOrderId, amount, orderId) => {
@@ -536,8 +646,16 @@ export default function Chat() {
             razorpay_payment_id: response.razorpay_payment_id,
             razorpay_signature:  response.razorpay_signature,
           });
-          if (data.success) setReceipt(data.receipt);
-          else showToast('Payment received but verification failed. Contact support.');
+          if (data.success) {
+            const shortId = data.receipt?.orderId ? data.receipt.orderId.slice(-8).toUpperCase() : orderId.slice(-8).toUpperCase();
+            const addr = data.receipt?.address || 'your address';
+            addMsg('payment-success', `Thank you for your order, ${firstName}! Your order #${shortId} has been confirmed and will be delivered to ${addr}. We hope you enjoy your purchase. Would you like to place another order?`, { orderId });
+            setCart(null);
+            setAwaitingAddress(false);
+            setPendingItems([]);
+          } else {
+            showToast('Payment received but verification failed. Contact support.');
+          }
         } catch { showToast('Verification failed. Contact support with your payment ID.'); }
         finally { setIsPaying(false); }
       },
@@ -557,29 +675,35 @@ export default function Chat() {
   };
 
   const startNewOrder = () => {
-    setReceipt(null); setMessages([]); setAwaitingAddress(false);
-    setPendingItems([]); setCart(null);
+    setReceipt(null);
+    setAwaitingAddress(false);
+    setPendingItems([]);
+    setCart(null);
+    setMessages([
+      {
+        id: 'msg-welcome-new',
+        role: 'ai',
+        type: 'text',
+        content: `Hi ${firstName}! Welcome back to SnapBuy — Everything you need. What would you like to buy today?`,
+        aiData: { confidence: 100, intentSource: 'system', addressResolution: 'profile' }
+      },
+      {
+        id: 'msg-chips-new',
+        role: 'ai',
+        type: 'suggestions',
+        suggestions: [
+          'Add 1 Wireless Mouse',
+          'Add 1 Notebook Set',
+          'Add 1 Instant Coffee',
+          'Explore Tech Essentials',
+          'Apply WELCOME10 coupon'
+        ]
+      }
+    ]);
     axios.post(`${API}/chat`, { message: 'clear cart' }).catch(() => {});
   };
 
-  const finalizeCart = async () => {
-    setIsPaying(true);
-    try {
-      const { data } = await axios.post(`${API}/cart/finalize`);
-      if (data.success) { setCart(null); await handlePay(data.razorpayOrderId, data.totalAmount, data.orderId); }
-    } catch (err) {
-      setIsPaying(false);
-      if (err.response?.data?.addressRequired) {
-        setAwaitingAddress(true);
-        if (cart) setPendingItems(cart.items);
-        addMsg('ai', 'Delivery address is required. Please type your delivery address below to complete the order.');
-      } else {
-        showToast(err.response?.data?.error || 'Failed to finalize cart. Please try again.');
-      }
-    }
-  };
-
-  if (receipt) return <PaymentSuccess receipt={receipt} onStartNewOrder={startNewOrder} />;
+  // if (receipt) return <PaymentSuccess receipt={receipt} onStartNewOrder={startNewOrder} />;
 
   const isWelcome = messages.length === 0;
 
@@ -589,29 +713,38 @@ export default function Chat() {
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
 
       {/* ── Header ─────────────────────────────────────────────────── */}
-      <header className="chat-header">
-        <div className="chat-header__left">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#2563eb" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
-            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
-          </svg>
-          <div>
-            <div className="chat-header__brand">SnapBuy</div>
-            <div className="chat-header__tagline">AI Powered Commerce</div>
-          </div>
-        </div>
-        <nav className="chat-header__right">
-          <button className="hdr-link" onClick={() => navigate('/history')}>Orders</button>
-          <button className="hdr-link" onClick={() => navigate('/profile')}>Profile</button>
-          <div className="avatar-menu">
-            <div className="avatar" title={user.name || user.email}>{avatarLetter}</div>
-            <div className="avatar-dropdown">
-              <div className="avatar-name">{user.name || user.email}</div>
-              <button className="avatar-logout" onClick={handleLogout}>Sign Out</button>
+      <Navbar cart={cart} onCartClick={() => setShowCartDrawer(true)} />
+
+      {/* ── Cart Drawer ────────────────────────────────────────────── */}
+      {showCartDrawer && (
+        <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(15, 23, 42, 0.4)', zIndex: 9999, display: 'flex', justifyContent: 'flex-end', animation: 'fadeIn 0.2s ease' }} onClick={() => setShowCartDrawer(false)}>
+          <div style={{ width: '400px', maxWidth: '100%', backgroundColor: '#fff', height: '100%', display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 15px rgba(0,0,0,0.1)', animation: 'slideInRight 0.3s ease' }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#0f172a' }}>Your Cart</h2>
+              <button onClick={() => setShowCartDrawer(false)} style={{ background: 'transparent', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#64748b' }}>×</button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', background: '#f8fafc' }}>
+              {cart && cart.items?.length > 0 ? (
+                <OrderSummaryCard
+                  orderData={cart}
+                  onPay={finalizeCart}
+                  onCartUpdate={updateCartItem}
+                  processing={isPaying}
+                />
+              ) : (
+                <div style={{ textAlign: 'center', marginTop: '3rem', color: '#64748b' }}>
+                  <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '1rem', opacity: 0.5 }}>
+                    <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+                    <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+                  </svg>
+                  <p style={{ margin: '0 0 1rem 0' }}>Your cart is empty.</p>
+                  <button onClick={() => setShowCartDrawer(false)} style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '6px', cursor: 'pointer' }}>Continue Shopping</button>
+                </div>
+              )}
             </div>
           </div>
-        </nav>
-      </header>
+        </div>
+      )}
 
       {/* ── Main ───────────────────────────────────────────────────── */}
       <main className="chat-main">
@@ -700,7 +833,7 @@ export default function Chat() {
               );
               if (msg.type === 'order-card') return (
                 <div key={msg.id} className="msg msg--ai">
-                  <OrderSummaryCard orderData={msg.orderData} onPay={handlePay} processing={isPaying} />
+                  <OrderSummaryCard orderData={msg.orderData} onPay={finalizeCart} onCartUpdate={setCart} processing={isPaying} />
                   {msg.aiLogic && <AILogicPanel data={msg.aiLogic} />}
                 </div>
               );
@@ -715,16 +848,25 @@ export default function Chat() {
                     <div style={{ marginBottom: '10px' }}>{msg.content}</div>
                     {msg.items?.length > 0 ? (
                       <div className="category-result-grid">
-                        {msg.items.map((p) => (
-                          <div key={p.id} className="category-result-card"
-                            onClick={() => sendMessage(`Add 1 ${p.name}`)}
-                            role="button" tabIndex={0}
-                            onKeyDown={e => e.key === 'Enter' && sendMessage(`Add 1 ${p.name}`)}>
-                            <div className="category-result-card__name">{p.name}</div>
-                            <div className="category-result-card__price">₹{p.price}</div>
-                            <div className="category-result-card__add">Tap to add</div>
+                        {msg.items.map((p) => {
+                          const cartItem = cart?.items?.find(i => i.name === p.name);
+                          return (
+                          <div key={p.id} className="category-result-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '1rem', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                            <div className="category-result-card__name" style={{ fontWeight: '600' }}>{p.name}</div>
+                            <div className="category-result-card__price" style={{ color: '#2563eb', fontWeight: '500' }}>₹{p.price}</div>
+                            {cartItem ? (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', marginTop: 'auto' }}>
+                                <button onClick={() => sendMessage(`remove 1 ${p.name}`)} style={{ padding: '0.25rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>-</button>
+                                <span>{cartItem.qty}</span>
+                                <button onClick={() => sendMessage(`add 1 ${p.name}`)} style={{ padding: '0.25rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>+</button>
+                              </div>
+                            ) : (
+                              <button onClick={() => sendMessage(`Add 1 ${p.name}`)} style={{ marginTop: 'auto', background: '#2563eb', color: '#fff', border: 'none', padding: '0.5rem', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>
+                                Add to Cart
+                              </button>
+                            )}
                           </div>
-                        ))}
+                        )})}
                       </div>
                     ) : (
                       <div style={{ color: '#64748b', fontSize: '0.85rem' }}>No products found in this category.</div>
@@ -735,7 +877,21 @@ export default function Chat() {
               if (msg.type === 'retry') return (
                 <div key={msg.id} className="msg msg--ai">
                   <RetryCard orderId={msg.retryOrderId} amount={msg.retryAmount}
-                    onRetry={handleRetry} onDismiss={() => removeMsg(msg.id)} processing={isPaying} />
+                    onRetry={handleRetry}
+                    onDismiss={() => removeMsg(msg.id)}
+                    onCancel={() => { removeMsg(msg.id); addMsg('ai', 'Your order has been cancelled. Feel free to start a new order anytime.'); }}
+                    processing={isPaying} />
+                </div>
+              );
+              if (msg.type === 'payment-success') return (
+                <div key={msg.id} className="msg msg--ai">
+                  <div className="msg__bubble msg__bubble--ai">
+                    <p style={{ margin: '0 0 1rem', fontWeight: 500 }}>{msg.content}</p>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <button onClick={() => setTrackingOrderId(msg.orderId)} style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}>Track Order</button>
+                      <button onClick={startNewOrder} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}>Start New Order</button>
+                    </div>
+                  </div>
                 </div>
               );
               return null;
@@ -789,6 +945,17 @@ export default function Chat() {
         )}
 
       </main>
+
+      {/* Tracking Modal */}
+      {trackingOrderId && (
+        <TrackingModal 
+          orderId={trackingOrderId}
+          onClose={() => setTrackingOrderId(null)}
+          onSimulateCall={(partner) => {
+            addMsg('ai', `Hi, I'm ${partner}, your delivery partner. I'm on my way!`);
+          }}
+        />
+      )}
     </div>
   );
 }

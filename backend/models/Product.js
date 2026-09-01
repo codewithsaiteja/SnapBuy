@@ -3,53 +3,82 @@ const mongoose = require('mongoose');
 const ProductSchema = new mongoose.Schema({
   name: {
     type: String,
-    required: true
+    required: true,
+    trim: true,
   },
   price: {
     type: Number,
-    required: true
+    required: true,
+  },
+  originalPrice: {
+    type: Number,
+    default: 0,
   },
   category: {
     type: String,
-    default: ''
+    default: '',
+    trim: true,
+  },
+  subcategory: {
+    type: String,
+    default: '',
+    trim: true,
   },
   description: {
     type: String,
-    default: ''
+    default: '',
   },
-  emoji: {
-    type: String,
-    default: ''
-  },
+  // image field (used by existing order references)
   image: {
     type: String,
-    default: ''
+    default: '',
   },
   imageUrl: {
     type: String,
-    default: ''
-  }
-});
+    default: '',
+  },
+  // Tags for natural language matching (e.g. ["milk chocolate","chocolate","sweet"])
+  tags: {
+    type: [String],
+    default: [],
+  },
+  // Target audience chips (student, developer, professional, office, remote)
+  targetAudience: {
+    type: [String],
+    default: [],
+  },
+  // Optional badge (e.g. "Best Seller", "Popular", "New")
+  badge: {
+    type: String,
+    default: '',
+  },
+  stock: {
+    type: Number,
+    default: 100,
+  },
+  sku: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  rating: {
+    type: Number,
+    default: 4.0,
+  },
+  reviews: {
+    type: Number,
+    default: 0,
+  },
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
+}, { timestamps: true });
 
-// Static method to seed products
-ProductSchema.statics.seedProducts = async function() {
-  const products = [
-    { name: 'Coffee', price: 499, image: 'https://via.placeholder.com/150?text=Coffee' },
-    { name: 'Mouse', price: 799, image: 'https://via.placeholder.com/150?text=Mouse' },
-    { name: 'USB-C Cable', price: 299, image: 'https://via.placeholder.com/150?text=USB-C' },
-    { name: 'Notebook', price: 150, image: 'https://via.placeholder.com/150?text=Notebook' },
-    { name: 'Desk Lamp', price: 1200, image: 'https://via.placeholder.com/150?text=Lamp' }
-  ];
-
-  try {
-    await this.deleteMany({});
-    await this.insertMany(products);
-    console.log('✅ Products seeded successfully');
-  } catch (error) {
-    console.error('❌ Error seeding products:', error);
-  }
-};
-
-ProductSchema.index({ name: 'text', description: 'text', category: 'text' });
+// Full-text search index — covers name, subcategory, category, tags, description
+ProductSchema.index({ name: 'text', subcategory: 'text', category: 'text', tags: 'text', description: 'text' });
+ProductSchema.index({ category: 1 });
+ProductSchema.index({ subcategory: 1 });
+ProductSchema.index({ targetAudience: 1 });
 
 module.exports = mongoose.model('Product', ProductSchema);

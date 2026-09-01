@@ -13,6 +13,31 @@ const UserSchema = new mongoose.Schema({
     lowercase: true,
     trim: true,
   },
+  phoneNumber: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  phoneVerified: {
+    type: Boolean,
+    default: false,
+  },
+  phoneVerificationCode: {
+    type: String,
+    default: '',
+  },
+  phoneVerificationExpires: {
+    type: Date,
+    default: null,
+  },
+  phoneVerificationAttempts: {
+    type: Number,
+    default: 0,
+  },
+  phoneVerificationCooldownUntil: {
+    type: Date,
+    default: null,
+  },
   password: {
     type: String,
     required: true,
@@ -23,6 +48,19 @@ const UserSchema = new mongoose.Schema({
     default: '',
     trim: true,
   },
+  selectedVoice: {
+    type: String,
+    default: "Google UK English Female"
+  },
+  voicePreferences: {
+    ttsEnabled: { type: Boolean, default: true },
+    sttEnabled: { type: Boolean, default: true }
+  },
+  addresses: [{
+    label: { type: String, required: true },
+    address: { type: String, required: true },
+    isDefault: { type: Boolean, default: false }
+  }],
   resetPasswordToken: {
     type: String,
   },

@@ -1,16 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import TrackingModal from '../components/TrackingModal';
 import './History.css';
 
 // ── Human-readable status config ──────────────────────────────────────────────
 const STATUS_CONFIG = {
-  CART:            { label: 'In Cart',        cls: 'badge-cart'    },
-  PENDING:         { label: 'Pending',        cls: 'badge-pending' },
-  ORDER_CREATED:   { label: 'Awaiting Payment', cls: 'badge-pending' },
-  PAID:            { label: 'Paid',           cls: 'badge-paid'    },
-  FAILED:          { label: 'Payment Failed', cls: 'badge-failed'  },
-  RETRY_GENERATED: { label: 'Retrying',       cls: 'badge-pending' },
+  CART:            { label: 'In Cart',          cls: 'badge-cart'    },
+  PENDING:         { label: 'Payment Pending',  cls: 'badge-pending' },
+  ORDER_CREATED:   { label: 'Order Created',    cls: 'badge-pending' },
+  PAID:            { label: 'Paid',             cls: 'badge-paid'    },
+  FAILED:          { label: 'Payment Failed',   cls: 'badge-failed'  },
+  RETRY_GENERATED: { label: 'Payment Pending',  cls: 'badge-pending' },
+  PROCESSING:      { label: 'Processing',       cls: 'badge-info'    },
+  COMPLETED:       { label: 'Completed',        cls: 'badge-paid'    },
+  CANCELLED:       { label: 'Cancelled',        cls: 'badge-failed'  },
 };
 
 function StatusBadge({ status }) {
@@ -92,6 +96,7 @@ export default function History() {
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
   const [selected, setSelected] = useState(null);
+  const [trackingOrderId, setTrackingOrderId] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -192,6 +197,11 @@ export default function History() {
                         <button className="hist-detail-btn" onClick={e => { e.stopPropagation(); setSelected(order); }} aria-label="View order details">
                           <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" strokeWidth="2" fill="none"><polyline points="9 18 15 12 9 6"/></svg>
                         </button>
+                        {order.status === 'PAID' && (
+                          <button onClick={e => { e.stopPropagation(); setTrackingOrderId(order._id); }} style={{ marginLeft: '0.5rem', background: '#2563eb', color: '#fff', border: 'none', padding: '0.25rem 0.5rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>
+                            Track Order
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -217,6 +227,11 @@ export default function History() {
                       {new Date(order.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                     </span>
                     <span className="hist-card__amount">₹{order.totalAmount.toLocaleString('en-IN')}</span>
+                    {order.status === 'PAID' && (
+                      <button onClick={e => { e.stopPropagation(); setTrackingOrderId(order._id); }} style={{ marginLeft: 'auto', background: '#2563eb', color: '#fff', border: 'none', padding: '0.25rem 0.5rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>
+                        Track Order
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -227,6 +242,17 @@ export default function History() {
 
       {/* Order detail modal */}
       {selected && <OrderModal order={selected} onClose={() => setSelected(null)} />}
+
+      {/* Tracking modal */}
+      {trackingOrderId && (
+        <TrackingModal 
+          orderId={trackingOrderId} 
+          onClose={() => setTrackingOrderId(null)} 
+          onSimulateCall={(partner) => {
+             alert(`Simulating call to ${partner}...`);
+          }}
+        />
+      )}
     </div>
   );
 }
