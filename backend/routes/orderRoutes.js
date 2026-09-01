@@ -786,11 +786,28 @@ router.post('/cart/finalize', auth, async (req, res) => {
 // POST /chat — AI shopping handler with STRICT INTENT LAYER
 // =============================================================================
 
+// Display-label map: internal DB category → user-facing label
+const CATEGORY_DISPLAY_LABELS = {
+  'Groceries':                   'Groceries & Essentials',
+  'Electronics':                 'Electronics & Gadgets',
+  'Chocolates & Confectionery':  'Food & Beverages',
+  'Biscuits & Cookies':          'Food & Beverages',
+  'Snacks':                      'Food & Beverages',
+  'Coffee & Tea':                'Food & Beverages',
+  'Beverages':                   'Food & Beverages',
+  'Fruits':                      'Food & Beverages',
+  'Vegetables':                  'Food & Beverages',
+  'Dairy & Eggs':                'Food & Beverages',
+};
+function categoryDisplayLabel(dbCategory) {
+  return CATEGORY_DISPLAY_LABELS[dbCategory] || dbCategory;
+}
+
 // Helper: Category-specific fallback when a requested item is unavailable
 async function getCategoryFallbackProducts(query) {
   const q = (query || '').toLowerCase();
   let targetCategory = '';
-  
+
   if (/chocolate|choco|sweet|candy|fudge/i.test(q)) targetCategory = 'Chocolates & Confectionery';
   else if (/biscuit|cookie|wafer|cracker|oreo/i.test(q)) targetCategory = 'Biscuits & Cookies';
   else if (/chip|crisp|snack|nacho|popcorn|namkeen|bhujia/i.test(q)) targetCategory = 'Snacks';
@@ -802,12 +819,12 @@ async function getCategoryFallbackProducts(query) {
 
   if (targetCategory) {
     const items = await Product.find({ isActive: true, category: targetCategory }).limit(4).lean();
-    if (items.length > 0) return { categoryName: targetCategory, items };
+    if (items.length > 0) return { categoryName: categoryDisplayLabel(targetCategory), items };
   }
 
   // Default fallback to popular food & grocery items
   const items = await Product.find({ isActive: true, category: { $in: ['Chocolates & Confectionery', 'Biscuits & Cookies', 'Snacks', 'Groceries'] } }).limit(4).lean();
-  return { categoryName: 'Popular Items', items };
+  return { categoryName: 'Food & Beverages', items };
 }
 
 // Helper: Deterministic Fast-Path Pre-classifier
@@ -971,7 +988,8 @@ Format: {"intent": "INTENT_NAME", "query": "extracted product name if product in
     if (intent.subtype === 'thanks' || /thank/i.test(msgLower)) {
       return res.json({ success: true, message: "You're welcome! Let me know if you need anything else." });
     }
-    return res.json({ success: true, message: "Hi! Welcome to SnapBuy. How can I help you today?" });
+    // Generic greeting — do NOT repeat the app welcome text; give a neutral prompt instead
+    return res.json({ success: true, message: "Hey there! What can I help you find today? You can ask me for products, check your cart, or apply a coupon." });
   }
 
   if (intentType === 'ABOUT_SNAPBUY') {

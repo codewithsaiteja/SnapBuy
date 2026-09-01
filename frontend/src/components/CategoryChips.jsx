@@ -48,11 +48,11 @@ const CATEGORY_ICONS = {
 };
 
 const CATEGORIES = [
-  { label: 'Groceries',      value: 'Groceries' },
-  { label: 'Electronics',    value: 'Electronics' },
-  { label: 'Personal Care',  value: 'Personal Care' },
-  { label: 'Home & Kitchen', value: 'Home & Kitchen' },
-  { label: 'Electrical',     value: 'Electrical' },
+  { label: 'Groceries & Essentials', value: 'Groceries' },
+  { label: 'Electronics & Gadgets',  value: 'Electronics' },
+  { label: 'Personal Care',          value: 'Personal Care' },
+  { label: 'Home & Kitchen',         value: 'Home & Kitchen' },
+  { label: 'Electrical',             value: 'Electrical' },
 ];
 
 /**

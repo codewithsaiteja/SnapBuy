@@ -179,7 +179,7 @@ function useSpeech(onTranscript, disabled) {
 
 // ─── Premium Composer ────────────────────────────────────────────────────────
 // Used in both welcome state (large) and active chat (compact bottom bar)
-function Composer({ onSend, disabled, placeholder, variant = 'welcome', inputRef: externalRef }) {
+function Composer({ onSend, onAddToCart, disabled, placeholder, variant = 'welcome', inputRef: externalRef }) {
   const [value, setValue] = useState('');
   const internalRef = useRef(null);
   const ref = externalRef || internalRef;
@@ -305,7 +305,16 @@ function Composer({ onSend, disabled, placeholder, variant = 'welcome', inputRef
                 key={p.id}
                 className="composer__dropdown-item"
                 role="option"
-                onClick={() => { setValue(''); setDropOpen(false); onSend(`Add 1 ${p.name}`); }}
+                onClick={() => {
+                  setValue('');
+                  setDropOpen(false);
+                  setResults([]);
+                  if (onAddToCart) {
+                    onAddToCart(p.name);  // direct cart action — no chat bubble
+                  } else {
+                    onSend(`Add 1 ${p.name}`);
+                  }
+                }}
               >
                 <span className="composer__dropdown-name">{p.name}</span>
                 <span className="composer__dropdown-price">₹{p.price}</span>
@@ -825,6 +834,7 @@ export default function Chat() {
               <div className="welcome-screen__composer-wrap">
                 <Composer
                   onSend={sendMessage}
+                  onAddToCart={(name) => directCartAction(name, 1)}
                   disabled={isTyping}
                   placeholder="What would you like to buy?"
                   variant="welcome"
@@ -982,6 +992,7 @@ export default function Chat() {
             ) : (
               <Composer
                 onSend={sendMessage}
+                onAddToCart={(name) => directCartAction(name, 1)}
                 disabled={isTyping}
                 placeholder="Ask anything — add, remove, change…"
                 variant="active"
