@@ -310,10 +310,6 @@ function Login() {
             <OTPInput otp={otp} setOtp={setOtp} onComplete={handleOtpSubmit} disabled={otpLoading} devOtp={verificationState.devOtp} />
           </div>
 
-          {verificationState.devOtp && (
-            <div className="otp-dev-box">Development code: <strong>{verificationState.devOtp}</strong></div>
-          )}
-
           <button className="submit-btn" disabled={otpLoading || otp.join('').length !== 6} onClick={() => handleOtpSubmit(otp.join(''))}>
             {otpLoading ? 'Verifying…' : 'Verify'}
           </button>
