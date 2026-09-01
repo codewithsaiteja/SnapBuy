@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 import { useNavigate } from 'react-router-dom';
 import './Profile.css';
 
@@ -110,7 +110,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (!token) { navigate('/login'); return; }
-    axios.get('/api/user/profile', authHeader())
+    api.get('/user/profile', authHeader())
       .then(({ data }) => {
         setUser(data.user);
         setStats(data.stats);
@@ -137,7 +137,7 @@ export default function Profile() {
     setVoicePrefs(updated);
     localStorage.setItem('voicePrefs', JSON.stringify(updated));
     try {
-      await axios.put('/api/user/voice-settings', updated, authHeader());
+      await api.put('/user/voice-settings', updated, authHeader());
     } catch { /* silent */ }
   };
 
@@ -146,7 +146,7 @@ export default function Profile() {
     localStorage.setItem('selectedVoice', vName);
     setUser(prev => ({ ...prev, selectedVoice: vName }));
     try {
-      await axios.put('/api/user/voice-settings', { selectedVoice: vName }, authHeader());
+      await api.put('/user/voice-settings', { selectedVoice: vName }, authHeader());
       flash(setSaveMsg, 'success', 'Voice preference saved.');
     } catch {
       flash(setSaveMsg, 'error', 'Could not save voice preference.');
@@ -157,7 +157,7 @@ export default function Profile() {
     e.preventDefault();
     setAddrSaving(true);
     try {
-      const { data } = await axios.post('/api/user/addresses', newAddr, authHeader());
+      const { data } = await api.post('/user/addresses', newAddr, authHeader());
       setAddresses(data.addresses);
       setShowAddForm(false);
       setNewAddr({ label: '', address: '', isDefault: false });
@@ -171,7 +171,7 @@ export default function Profile() {
 
   const handleSetDefault = async (id) => {
     try {
-      const { data } = await axios.put(`/api/user/addresses/${id}/default`, {}, authHeader());
+      const { data } = await api.put(`/user/addresses/${id}/default`, {}, authHeader());
       setAddresses(data.addresses);
       if (data.defaultAddress) setUser(u => ({ ...u, defaultAddress: data.defaultAddress }));
       flash(setSaveMsg, 'success', 'Default address updated.');
@@ -192,7 +192,7 @@ export default function Profile() {
     }
     setSaving(true);
     try {
-      await axios.put('/api/user/change-password', passData, authHeader());
+      await api.put('/user/change-password', passData, authHeader());
       flash(setPassMsg, 'success', 'Password updated successfully.');
       setPassData({ oldPassword: '', newPassword: '', confirmPassword: '' });
     } catch (err) {

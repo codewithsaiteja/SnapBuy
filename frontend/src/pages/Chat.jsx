@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import axios from 'axios';
+import api from '../utils/api';
 import { triggerRazorpay } from '../utils/razorpay';
 import OrderSummaryCard from '../components/OrderSummaryCard';
 import PaymentSuccess from '../components/PaymentSuccess';
@@ -8,14 +8,9 @@ import TrackingModal from '../components/TrackingModal';
 import Navbar from '../components/Navbar';
 import './Chat.css';
 
-const API = '/api';
-
-// Attach JWT to every axios request
-axios.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+// All requests go through the centralised api instance (see utils/api.js)
+// which uses VITE_API_URL in production and the Vite proxy in dev.
+const API = '';
 
 // ─── Welcome screen example prompts ─────────────────────────────────────────
 const EXAMPLE_PROMPTS = [
@@ -201,7 +196,7 @@ function Composer({ onSend, disabled, placeholder, variant = 'welcome', inputRef
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       try {
-        const { data } = await axios.get(`${API}/products/search`, { params: { q, limit: 5 } });
+        const { data } = await api.get(`${API}/products/search`, { params: { q, limit: 5 } });
         setResults(data.products || []);
         setDropOpen(true);
       } catch { setResults([]); }
@@ -478,7 +473,7 @@ export default function Chat() {
 
   // Load existing cart on mount
   useEffect(() => {
-    axios.get(`${API}/cart`)
+    api.get(`${API}/cart`)
       .then(({ data }) => { if (data.success && data.cart) setCart(data.cart); })
       .catch(() => {});
   }, []);
@@ -531,7 +526,7 @@ export default function Chat() {
   async function finalizeCart() {
     setIsPaying(true);
     try {
-      const { data } = await axios.post(`${API}/cart/finalize`);
+      const { data } = await api.post(`${API}/cart/finalize`);
       if (data.success) { setCart(null); await handlePay(data.razorpayOrderId, data.totalAmount, data.orderId); }
     } catch (err) {
       setIsPaying(false);
@@ -554,7 +549,7 @@ export default function Chat() {
     // ── Checkout intent — user says "no", "that's all", "checkout", "proceed", "done"
     const checkoutTriggers = /^(no|nope|that'?s? all|done|checkout|check out|proceed|proceed to (payment|checkout)|i'?m done|pay now|finalize)$/i;
     if (!awaitingAddress && checkoutTriggers.test(trimmed)) {
-      const cartCheck = await axios.get(`${API}/cart`).catch(() => null);
+      const cartCheck = await api.get(`${API}/cart`).catch(() => null);
       const activeCart = cartCheck?.data?.cart;
       if (activeCart && activeCart.items?.length > 0) {
         if (!activeCart.address || activeCart.address === 'Address Pending') {
@@ -582,7 +577,7 @@ export default function Chat() {
       const body = awaitingAddress
         ? { message: trimmed, isAddress: true, pendingItems }
         : { message: trimmed };
-      const { data } = await axios.post(`${API}/chat`, body);
+      const { data } = await api.post(`${API}/chat`, body);
       setIsTyping(false);
 
       if (data.cart !== undefined) setCart(data.cart);
@@ -641,7 +636,7 @@ export default function Chat() {
       razorpayOrderId, amount, orderId,
       async (response) => {
         try {
-          const { data } = await axios.post(`${API}/verify-payment`, {
+          const { data } = await api.post(`${API}/verify-payment`, {
             razorpay_order_id:   response.razorpay_order_id,
             razorpay_payment_id: response.razorpay_payment_id,
             razorpay_signature:  response.razorpay_signature,
@@ -667,7 +662,7 @@ export default function Chat() {
   const handleRetry = async (orderId, amount) => {
     setIsPaying(true);
     try {
-      const { data } = await axios.post(`${API}/retry-payment`, { orderId });
+      const { data } = await api.post(`${API}/retry-payment`, { orderId });
       if (data.maxRetriesReached) { showToast('Maximum retry attempts reached. Please start a new order.'); setIsPaying(false); return; }
       setMessages(prev => prev.filter(m => m.type !== 'retry'));
       await handlePay(data.razorpayOrderId, amount, orderId);
@@ -700,7 +695,7 @@ export default function Chat() {
         ]
       }
     ]);
-    axios.post(`${API}/chat`, { message: 'clear cart' }).catch(() => {});
+    api.post(`${API}/chat`, { message: 'clear cart' }).catch(() => {});
   };
 
   // if (receipt) return <PaymentSuccess receipt={receipt} onStartNewOrder={startNewOrder} />;

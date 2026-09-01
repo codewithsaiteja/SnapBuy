@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../utils/api';
 import './Auth.css';
 
 /* ── Password strength ──────────────────────────────────────────────────── */
@@ -66,16 +66,16 @@ export default function Auth() {
     setLoading(true);
     try {
       if (mode === 'forgot') {
-        await axios.post('/api/auth/forgot-password', { email: form.email });
+        await api.post('/auth/forgot-password', { email: form.email });
         setSuccess('Reset link logged to the server console. Check your backend terminal.');
         setLoading(false);
         return;
       }
-      const endpoint = mode === 'register' ? '/api/auth/register' : '/api/auth/login';
+      const endpoint = mode === 'register' ? '/auth/register' : '/auth/login';
       const payload  = mode === 'register'
         ? { name: form.name, email: form.email, password: form.password }
         : { email: form.email, password: form.password };
-      const { data } = await axios.post(endpoint, payload);
+      const { data } = await api.post(endpoint, payload);
       if (data.token) {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user',  JSON.stringify(data.user));

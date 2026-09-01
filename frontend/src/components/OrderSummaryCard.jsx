@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 import './OrderSummaryCard.css';
 
 /**
@@ -38,7 +38,7 @@ export default function OrderSummaryCard({ orderData, onPay, onCartUpdate, proce
     setCouponLoading(true);
     setCouponStatus(null);
     try {
-      const { data } = await axios.post('/api/coupon/apply', { couponCode: code });
+      const { data } = await api.post('/coupon/apply', { couponCode: code });
       if (data.success) {
         setCouponStatus({
           type:     'success',
@@ -62,7 +62,7 @@ export default function OrderSummaryCard({ orderData, onPay, onCartUpdate, proce
   const handleRemoveCoupon = useCallback(async () => {
     setCouponStatus(null);
     try {
-      const { data } = await axios.delete('/api/coupon/remove');
+      const { data } = await api.delete('/coupon/remove');
       if (data.success && data.cart && onCartUpdate) onCartUpdate(data.cart);
     } catch { /* non-fatal */ }
   }, [onCartUpdate]);
@@ -72,7 +72,7 @@ export default function OrderSummaryCard({ orderData, onPay, onCartUpdate, proce
     if (editLoading) return;
     setEditLoading(productName);
     try {
-      const { data } = await axios.post('/api/cart/update', { productName, qty: newQty });
+      const { data } = await api.post('/cart/update', { productName, qty: newQty });
       if (data.success !== false && data.cart !== undefined && onCartUpdate) {
         onCartUpdate(data.cart);
       }
@@ -85,7 +85,7 @@ export default function OrderSummaryCard({ orderData, onPay, onCartUpdate, proce
     if (editLoading) return;
     setEditLoading(productName);
     try {
-      const { data } = await axios.post('/api/cart/update', { productName, qty: 0 });
+      const { data } = await api.post('/cart/update', { productName, qty: 0 });
       if (onCartUpdate) onCartUpdate(data.cart ?? null);
     } catch { /* non-fatal */ }
     finally { setEditLoading(null); }

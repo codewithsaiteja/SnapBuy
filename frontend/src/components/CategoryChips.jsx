@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 import './CategoryChips.css';
 
 const API = '/api';
@@ -70,7 +70,7 @@ export default function CategoryChips({ onCategorySelect, disabled }) {
     setActive(cat.value);
     setLoading(cat.value);
     try {
-      const { data } = await axios.get(`${API}/products/search`, {
+      const { data } = await api.get(`${API}/products/search`, {
         params: { q: cat.value, limit: 4, category: true },
       });
       onCategorySelect(cat.label, data.products || []);

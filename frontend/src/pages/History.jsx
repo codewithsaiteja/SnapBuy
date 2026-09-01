@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../utils/api';
 import TrackingModal from '../components/TrackingModal';
 import './History.css';
 
@@ -100,7 +100,7 @@ export default function History() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    axios.get('/api/orders/me')
+    api.get('/orders/me')
       .then(r => setOrders(r.data.orders || []))
       .catch(() => setError('Could not load order history. Please try again.'))
       .finally(() => setLoading(false));

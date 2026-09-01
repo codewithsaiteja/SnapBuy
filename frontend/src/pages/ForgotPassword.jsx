@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../utils/api';
 import './Login.css';
 
 export default function ForgotPassword() {
@@ -16,10 +16,10 @@ export default function ForgotPassword() {
     setError('');
     setMessage('');
     try {
-      const res = await axios.post('/api/auth/forgot-password', { email });
+      const res = await api.post('/auth/forgot-password', { email });
       setMessage(res.data.message || 'Reset link sent. Check your inbox.');
     } catch (err) {
-      setError(err.response?.data?.error || 'Something went wrong. Please try again.');
+      setError(err.userMessage || 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }

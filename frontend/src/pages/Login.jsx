@@ -1,9 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../utils/api';
 import './Login.css';
-
-const API_URL = '';
 
 function checkPasswordStrength(password) {
   if (!password) return { score: 0, label: '', color: '', percent: 0, checks: {} };
@@ -147,7 +145,7 @@ function Login() {
     setLoading(true);
 
     try {
-      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+      const endpoint = isRegister ? '/auth/register' : '/auth/login';
       const payload = isRegister
         ? {
             name: formData.name,
@@ -158,7 +156,7 @@ function Login() {
           }
         : { email: formData.email, password: formData.password };
 
-      const response = await axios.post(`${API_URL}${endpoint}`, payload);
+      const response = await api.post(endpoint, payload);
 
       if (response.data.requiresPhoneVerification || response.data.phoneVerificationRequired) {
         const token = response.data.token || localStorage.getItem('token');
@@ -197,11 +195,7 @@ function Login() {
         return;
       }
 
-      if (!err.response) {
-        setError('Cannot connect to server. Make sure the backend is running on port 5000.');
-      } else {
-        setError(err.response.data?.error || 'Something went wrong. Please try again.');
-      }
+      setError(err.userMessage || err.response?.data?.error || 'Something went wrong. Please try again.');
       console.error('[Auth error]', err.response?.data || err.message);
     } finally {
       setLoading(false);
@@ -223,7 +217,7 @@ function Login() {
     setError('');
 
     try {
-      const response = await axios.post('/api/auth/verify-phone', { code }, {
+      await api.post('/auth/verify-phone', { code }, {
         headers: { Authorization: `Bearer ${verificationState.token}` },
       });
 
@@ -237,7 +231,7 @@ function Login() {
         setIsRegister(false);
       }, 3000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Verification failed. Please try again.');
+      setError(err.userMessage || err.response?.data?.error || 'Verification failed. Please try again.');
     } finally {
       setOtpLoading(false);
     }
@@ -246,7 +240,7 @@ function Login() {
   const handleResendOtp = async () => {
     if (!verificationState.token || resendSeconds > 0) return;
     try {
-      const response = await axios.post('/api/auth/resend-otp', {}, {
+      const response = await api.post('/auth/resend-otp', {}, {
         headers: { Authorization: `Bearer ${verificationState.token}` },
       });
       setVerificationState((prev) => ({ ...prev, devOtp: response.data.devOtp || prev.devOtp }));
@@ -254,7 +248,7 @@ function Login() {
       setResendSeconds(30);
       setError('');
     } catch (err) {
-      setError(err.response?.data?.error || 'Unable to resend code right now.');
+      setError(err.userMessage || err.response?.data?.error || 'Unable to resend code right now.');
     }
   };
 

@@ -29,13 +29,21 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// ─── CORS — allow both localhost variants with credentials ────────────────────
+// ─── CORS — allow localhost (dev) + deployed Vercel frontend (prod) ───────────
+const ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://snap-buy-woad.vercel.app',
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    process.env.FRONTEND_URL,
-  ].filter(Boolean),
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin '${origin}' not allowed`));
+  },
   credentials: true,
 }));
 

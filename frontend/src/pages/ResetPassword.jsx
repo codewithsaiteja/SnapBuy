@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import axios from 'axios';
+import api from '../utils/api';
 import './Login.css';
 
 export default function ResetPassword() {
@@ -26,11 +26,11 @@ export default function ResetPassword() {
     setError('');
     setMessage('');
     try {
-      const res = await axios.post(`/api/auth/reset-password/${token}`, { password });
+      const res = await api.post(`/auth/reset-password/${token}`, { password });
       setMessage(res.data.message || 'Password reset successfully.');
       setTimeout(() => navigate('/login'), 2500);
     } catch (err) {
-      setError(err.response?.data?.error || 'Reset link may have expired. Please request a new one.');
+      setError(err.userMessage || 'Reset link may have expired. Please request a new one.');
     } finally {
       setLoading(false);
     }

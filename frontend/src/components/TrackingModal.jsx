@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 
 function TrackingModal({ orderId, onClose, onSimulateCall }) {
   const [data, setData] = useState(null);
@@ -8,7 +8,7 @@ function TrackingModal({ orderId, onClose, onSimulateCall }) {
   useEffect(() => {
     const fetchTracking = async () => {
       try {
-        const res = await axios.post(`/api/orders/track/${orderId}`, {}, {
+        const res = await api.post(`/orders/track/${orderId}`, {}, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
         });
         setData(res.data);
