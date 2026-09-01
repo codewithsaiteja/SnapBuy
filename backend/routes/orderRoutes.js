@@ -808,23 +808,97 @@ async function getCategoryFallbackProducts(query) {
   const q = (query || '').toLowerCase();
   let targetCategory = '';
 
-  if (/chocolate|choco|sweet|candy|fudge/i.test(q)) targetCategory = 'Chocolates & Confectionery';
-  else if (/biscuit|cookie|wafer|cracker|oreo/i.test(q)) targetCategory = 'Biscuits & Cookies';
-  else if (/chip|crisp|snack|nacho|popcorn|namkeen|bhujia/i.test(q)) targetCategory = 'Snacks';
-  else if (/coffee|tea|chai|caffeine|brew/i.test(q)) targetCategory = 'Coffee & Tea';
-  else if (/juice|soda|drink|beverage|cola|water/i.test(q)) targetCategory = 'Beverages';
-  else if (/fruit|apple|banana|mango|berry|orange|grapes|dragon/i.test(q)) targetCategory = 'Fruits';
-  else if (/veg|tomato|potato|onion|vegetable/i.test(q)) targetCategory = 'Vegetables';
-  else if (/mouse|keyboard|headphone|cable|electronics|gadget|phone/i.test(q)) targetCategory = 'Electronics';
+  // Map common search terms to categories with normalization
+  if (/chocolate|choco|sweet|candy|fudge|cocoa|cadbury|kit\s*kat|dairy\s*milk|ferrero|snickers/i.test(q)) targetCategory = 'Food & Beverages';
+  else if (/ice\s*cream|icecream|kulfi|frozen|dessert|amul.*cream|cone|vanilla.*cream|chocolate.*cream/i.test(q)) targetCategory = 'Food & Beverages';
+  else if (/bread|pav|bun|loaf|toast|sandwich.*bread|brown.*bread|wheat.*bread|multigrain|bakery|cake|pastry|croissant|muffin/i.test(q)) targetCategory = 'Food & Beverages';
+  else if (/biscuit|cookie|wafer|cracker|oreo|britannia|parle/i.test(q)) targetCategory = 'Food & Beverages';
+  else if (/chip|crisp|snack|nacho|popcorn|namkeen|bhujia|lay|kurkure|mixture/i.test(q)) targetCategory = 'Food & Beverages';
+  else if (/coffee|tea|chai|caffeine|brew|nescafe|tata.*tea|green.*tea/i.test(q)) targetCategory = 'Groceries & Essentials';
+  else if (/juice|soda|drink|beverage|cola|pepsi|coke|sprite|water|maaza|frooti|thums.*up/i.test(q)) targetCategory = 'Food & Beverages';
+  else if (/milk|dairy|curd|paneer|butter|cheese|yogurt|amul.*milk|mother.*dairy/i.test(q)) targetCategory = 'Food & Beverages';
+  else if (/rice|atta|flour|dal|pulses|oil|ghee|spice|masala|grocery|groceries|basmati|wheat/i.test(q)) targetCategory = 'Groceries & Essentials';
+  else if (/shampoo|soap|toothpaste|face.*wash|lotion|cream|deodorant|personal.*care|hygiene/i.test(q)) targetCategory = 'Personal Care';
+  else if (/detergent|dishwash|cleaner|home.*care|cleaning|floor.*cleaner/i.test(q)) targetCategory = 'Home Care';
+  else if (/mouse|keyboard|headphone|earphone|cable|charger|power.*bank|electronics|gadget|phone|usb|bluetooth/i.test(q)) targetCategory = 'Electronics & Gadgets';
+  else if (/pen|pencil|notebook|stationery|eraser|ruler/i.test(q)) targetCategory = 'Stationery & Office';
+  else if (/diaper|baby.*food|baby.*care/i.test(q)) targetCategory = 'Baby Care';
+  else if (/dog.*food|cat.*food|pet/i.test(q)) targetCategory = 'Pet Supplies';
 
   if (targetCategory) {
-    const items = await Product.find({ isActive: true, category: targetCategory }).limit(4).lean();
-    if (items.length > 0) return { categoryName: categoryDisplayLabel(targetCategory), items };
+    const items = await Product.find({ isActive: true, category: targetCategory }).limit(6).lean();
+    if (items.length > 0) return { categoryName: targetCategory, items };
   }
 
-  // Default fallback to popular food & grocery items
-  const items = await Product.find({ isActive: true, category: { $in: ['Chocolates & Confectionery', 'Biscuits & Cookies', 'Snacks', 'Groceries'] } }).limit(4).lean();
+  // Fallback: search by subcategory too
+  const subcatItems = await Product.find({ 
+    isActive: true, 
+    $or: [
+      { subcategory: { $regex: q, $options: 'i' } },
+      { category: { $regex: q, $options: 'i' } }
+    ]
+  }).limit(6).lean();
+  
+  if (subcatItems.length > 0) {
+    return { categoryName: subcatItems[0].category || 'Products', items: subcatItems };
+  }
+
+  // Default fallback to popular food items
+  const items = await Product.find({ isActive: true, category: 'Food & Beverages' }).limit(6).lean();
   return { categoryName: 'Food & Beverages', items };
+}
+
+// Helper: Normalize search query to handle variations
+function normalizeSearchQuery(query) {
+  if (!query) return '';
+  
+  let normalized = query.toLowerCase().trim();
+  
+  // Handle spacing variations
+  normalized = normalized
+    .replace(/ice\s*cream/gi, 'ice cream')
+    .replace(/dairy\s*milk/gi, 'dairy milk')
+    .replace(/power\s*bank/gi, 'power bank')
+    .replace(/green\s*tea/gi, 'green tea')
+    .replace(/brown\s*bread/gi, 'brown bread')
+    .replace(/face\s*wash/gi, 'face wash')
+    .replace(/tooth\s*paste/gi, 'toothpaste')
+    .replace(/hand\s*wash/gi, 'handwash')
+    .replace(/kit\s*kat/gi, 'kitkat');
+  
+  // Handle plural/singular
+  const singularMap = {
+    'chocolates': 'chocolate',
+    'biscuits': 'biscuit',
+    'cookies': 'cookie',
+    'snacks': 'snack',
+    'chips': 'chip',
+    'beverages': 'beverage',
+    'drinks': 'drink',
+    'groceries': 'grocery',
+    'gadgets': 'gadget',
+    'cables': 'cable',
+    'chargers': 'charger',
+    'headphones': 'headphone',
+    'earphones': 'earphone'
+  };
+  
+  // Check if entire query is just a plural word
+  for (const [plural, singular] of Object.entries(singularMap)) {
+    if (normalized === plural) {
+      normalized = singular;
+      break;
+    }
+  }
+  
+  // Common misspellings and variations
+  normalized = normalized
+    .replace(/cadbury/gi, 'cadbury')
+    .replace(/choclate/gi, 'chocolate')
+    .replace(/biscut/gi, 'biscuit')
+    .replace(/grocerry/gi, 'grocery');
+  
+  return normalized;
 }
 
 // Helper: Deterministic Fast-Path Pre-classifier
@@ -840,38 +914,43 @@ function classifyFastPathIntent(msgLower, trimmed) {
     return { intent: 'PAYMENT' };
   }
 
-  // Greetings
-  if (/^(hi|hello|hey|good morning|good afternoon|good evening|greetings|howdy|hey there)$/i.test(msgLower)) {
+  // STRICT Greetings - only simple greetings WITHOUT product context
+  if (/^(hi|hello|hey|good morning|good afternoon|good evening|greetings|howdy|hey there|namaste|yo)$/i.test(msgLower)) {
     return { intent: 'GENERAL_CONVERSATION', subtype: 'greeting' };
   }
 
-  // Pleasantries
-  if (/^(how are you|how are you doing|how do you do|who are you)$/i.test(msgLower)) {
+  // STRICT Pleasantries - only about chatbot/user state
+  if (/^(how are you|how are you doing|how do you do|who are you|what'?s your name)$/i.test(msgLower)) {
     return { intent: 'GENERAL_CONVERSATION', subtype: 'pleasantry' };
   }
 
-  // Gratitude
-  if (/^(thanks|thank you|thanks a lot|you'?re helpful|appreciate it)$/i.test(msgLower)) {
+  // STRICT Gratitude - only standalone thanks
+  if (/^(thanks|thank you|thanks a lot|thanks so much|ty|thx|you'?re helpful|appreciate it|cool|nice|awesome|great)$/i.test(msgLower)) {
     return { intent: 'GENERAL_CONVERSATION', subtype: 'thanks' };
   }
 
   // Capabilities / Help
-  if (/^(what can you do|help|capabilities|what are your features|tell me about snapbuy|what is snapbuy)$/i.test(msgLower)) {
+  if (/^(what can you do|help|capabilities|what are your features|commands)$/i.test(msgLower)) {
     return { intent: 'HELP' };
   }
 
+  // About SnapBuy
+  if (/^(tell me about snapbuy|what is snapbuy|about snapbuy|what does snapbuy do)$/i.test(msgLower)) {
+    return { intent: 'ABOUT_SNAPBUY' };
+  }
+
   // View Cart
-  if (/^(what'?s in my cart|show my cart|show cart|view cart|my cart|cart status|how many items in my cart|my total)$/i.test(msgLower)) {
+  if (/^(what'?s in my cart|show my cart|show cart|view cart|my cart|cart status|how many items in my cart|my total|cart)$/i.test(msgLower)) {
     return { intent: 'VIEW_CART' };
   }
 
   // Clear Cart
-  if (/^(clear cart|empty cart|reset cart)$/i.test(msgLower)) {
+  if (/^(clear cart|empty cart|reset cart|remove all|delete all items)$/i.test(msgLower)) {
     return { intent: 'CLEAR_CART' };
   }
 
   // Order Status & Tracking
-  if (/^(where is my order|track my order|what'?s my order status|when will my order arrive|show my orders|my orders|recent orders)$/i.test(msgLower)) {
+  if (/^(where is my order|track my order|what'?s my order status|when will my order arrive|show my orders|my orders|recent orders|order history|track order)$/i.test(msgLower)) {
     return { intent: 'ORDER_STATUS' };
   }
 
@@ -881,14 +960,16 @@ function classifyFastPathIntent(msgLower, trimmed) {
     return { intent: 'DELIVERY_ADDRESS', address: addr };
   }
 
-  // Coupon / Discount questions
-  if (/(?:student10|coupon|discount|offer|promo)/i.test(msgLower)) {
+  // Coupon / Discount questions (but NOT product searches that mention "offer" or "deal")
+  if (/^(apply coupon|use coupon|apply student10|student10|any discount|any offer|discount code|promo code|coupon code|what discounts do you have)$/i.test(msgLower)) {
     if (/student/i.test(msgLower)) return { intent: 'DISCOUNT_OFFER', subtype: 'student' };
     const cMatch = parseCouponIntent(trimmed);
     if (cMatch) return { intent: cMatch.intent, couponCode: cMatch.couponCode };
     return { intent: 'DISCOUNT_OFFER' };
   }
 
+  // If message contains shopping keywords, let it pass to LLM or fallback to PRODUCT_SEARCH
+  // Do NOT classify as GENERAL_CONVERSATION
   return null;
 }
 
@@ -942,17 +1023,19 @@ router.post('/chat', auth, async (req, res) => {
 GENERAL_CONVERSATION, ABOUT_SNAPBUY, HELP, DISCOUNT_OFFER, DELIVERY, ORDER_STATUS, PAYMENT, CHECKOUT, VIEW_CART, CLEAR_CART, ADD_TO_CART, REMOVE_FROM_CART, UPDATE_QUANTITY, PRODUCT_SEARCH.
 
 Rules:
-- Greetings (Hi, Hello, How are you) -> GENERAL_CONVERSATION
+- Simple greetings ONLY (Hi, Hello, Thanks) -> GENERAL_CONVERSATION
 - "What can you do?" -> HELP
 - "What is SnapBuy?" -> ABOUT_SNAPBUY
 - "Student offer", "Any discounts?" -> DISCOUNT_OFFER
 - "Where is my order" -> ORDER_STATUS
-- "I want chips", "Find chocolates", "Show me coffee", "Do you have Oreo?" -> PRODUCT_SEARCH
+- Product queries (dairy milk, ice cream, chocolates, bread, chips, groceries, gadgets, show me X, find X, I want X) -> PRODUCT_SEARCH
 - "Add 2 chocolates", "Buy a mouse" -> ADD_TO_CART
 - "Remove mouse" -> REMOVE_FROM_CART
 - "Make it 3" -> UPDATE_QUANTITY
 - "Checkout", "Proceed to checkout" -> CHECKOUT
 - "Pay now" -> PAYMENT
+
+If the message mentions ANY product name, brand, or category (chocolate, bread, ice cream, snacks, electronics, etc.) -> PRODUCT_SEARCH
 
 Respond ONLY with valid JSON.
 Format: {"intent": "INTENT_NAME", "query": "extracted product name if product intent", "quantity": 1}`;
@@ -968,8 +1051,9 @@ Format: {"intent": "INTENT_NAME", "query": "extracted product name if product in
       raw = raw.replace(/```json/g, '').replace(/```/g, '').trim();
       intent = JSON.parse(raw);
     } catch (e) {
-      // Safe fallback: ONLY route to PRODUCT_SEARCH if text has shopping keywords
-      if (/(?:buy|find|show|search|want|need|get|chocolate|biscuit|coffee|tea|chips|mouse|keyboard|juice|milk|oil|rice)/i.test(msgLower)) {
+      console.error('[CHAT] LLM classification failed:', e.message);
+      // Safe fallback: route to PRODUCT_SEARCH if text has shopping keywords
+      if (/(?:buy|find|show|search|want|need|get|add|order|chocolate|biscuit|coffee|tea|chips|mouse|keyboard|juice|milk|oil|rice|bread|ice cream|snack|beverage|grocery|gadget|electronic)/i.test(msgLower)) {
         intent = { intent: 'PRODUCT_SEARCH', query: trimmed, quantity: 1 };
       } else {
         intent = { intent: 'GENERAL_CONVERSATION' };
@@ -1055,26 +1139,68 @@ Format: {"intent": "INTENT_NAME", "query": "extracted product name if product in
 
   // Handle Cart Modifications & Product Search
   if (['ADD_TO_CART', 'REMOVE_FROM_CART', 'UPDATE_QUANTITY', 'PRODUCT_SEARCH'].includes(intentType)) {
-    const q = (intent.query || trimmed).replace(/^(add|buy|get|find|show me|search for)\s+/i, '').trim();
+    const q = (intent.query || trimmed).replace(/^(add|buy|get|find|show me|search for|i want|i need|give me|show)\s+/i, '').trim();
+    const normalizedQuery = normalizeSearchQuery(q);
 
-    // 4-tier MongoDB Search
-    const smartSearch = async (query, limit = 6) => {
+    // Enhanced 4-tier MongoDB Search with normalization
+    const smartSearch = async (query, limit = 12) => {
       if (!query) return [];
-      try {
-        const txt = await Product.find(
-          { isActive: true, $text: { $search: query } },
-          { score: { $meta: 'textScore' }, name: 1, price: 1, category: 1, image: 1, imageUrl: 1 }
-        ).sort({ score: { $meta: 'textScore' } }).limit(limit).lean();
-        if (txt.length > 0) return txt;
-      } catch {}
+      
+      // Try with normalized query first
+      const searchQueries = [query];
+      if (normalizedQuery !== query) {
+        searchQueries.push(normalizedQuery);
+      }
+      
+      // Also try expanded terms for category searches
+      if (/^(chocolate|ice cream|bread|snack|beverage|grocery|gadget|electronic)s?$/i.test(query)) {
+        // This is a category-level search, cast wider net
+        limit = 20;
+      }
+      
+      for (const searchTerm of searchQueries) {
+        try {
+          // Tier 1: Full-text search
+          const txt = await Product.find(
+            { isActive: true, $text: { $search: searchTerm } },
+            { score: { $meta: 'textScore' }, name: 1, price: 1, originalPrice: 1, discountPercentage: 1, category: 1, subcategory: 1, brand: 1, rating: 1, reviewCount: 1, labels: 1, unit: 1, weightOrSize: 1, image: 1, imageUrl: 1 }
+          ).sort({ score: { $meta: 'textScore' } }).limit(limit).lean();
+          if (txt.length > 0) return txt;
+        } catch {}
 
-      const byName = await Product.find({ isActive: true, name: { $regex: query, $options: 'i' } }, 'name price category image imageUrl').limit(limit).lean();
-      if (byName.length > 0) return byName;
+        // Tier 2: Name regex match
+        const byName = await Product.find(
+          { isActive: true, name: { $regex: searchTerm, $options: 'i' } },
+          'name price originalPrice discountPercentage category subcategory brand rating reviewCount labels unit weightOrSize image imageUrl'
+        ).limit(limit).lean();
+        if (byName.length > 0) return byName;
 
-      const byCat = await Product.find({ isActive: true, category: { $regex: query, $options: 'i' } }, 'name price category image imageUrl').limit(limit).lean();
-      if (byCat.length > 0) return byCat;
+        // Tier 3: Brand match
+        const byBrand = await Product.find(
+          { isActive: true, brand: { $regex: searchTerm, $options: 'i' } },
+          'name price originalPrice discountPercentage category subcategory brand rating reviewCount labels unit weightOrSize image imageUrl'
+        ).limit(limit).lean();
+        if (byBrand.length > 0) return byBrand;
 
-      return Product.find({ isActive: true, tags: { $regex: query, $options: 'i' } }, 'name price category image imageUrl').limit(limit).lean();
+        // Tier 4: Category/Subcategory match
+        const byCat = await Product.find(
+          { isActive: true, $or: [
+            { category: { $regex: searchTerm, $options: 'i' } },
+            { subcategory: { $regex: searchTerm, $options: 'i' } }
+          ]},
+          'name price originalPrice discountPercentage category subcategory brand rating reviewCount labels unit weightOrSize image imageUrl'
+        ).limit(limit).lean();
+        if (byCat.length > 0) return byCat;
+
+        // Tier 5: Tags match
+        const byTags = await Product.find(
+          { isActive: true, tags: { $regex: searchTerm, $options: 'i' } },
+          'name price originalPrice discountPercentage category subcategory brand rating reviewCount labels unit weightOrSize image imageUrl'
+        ).limit(limit).lean();
+        if (byTags.length > 0) return byTags;
+      }
+      
+      return [];
     };
 
     const results = await smartSearch(q);
@@ -1084,17 +1210,48 @@ Format: {"intent": "INTENT_NAME", "query": "extracted product name if product in
       const fallback = await getCategoryFallbackProducts(q);
       return res.json({
         success: true,
-        message: `That item isn't available on SnapBuy right now. We're continuously expanding our selection. Meanwhile, here are some similar options in ${fallback.categoryName} you may like:`,
-        items: fallback.items.map(p => ({ id: p._id, name: p.name, price: p.price, category: p.category })),
+        message: `I couldn't find "${q}" in our catalog right now. We're continuously expanding our selection. Meanwhile, here are some similar options in ${fallback.categoryName} you might like:`,
+        items: fallback.items.map(p => ({ 
+          id: p._id, 
+          name: p.name, 
+          price: p.price, 
+          originalPrice: p.originalPrice,
+          discountPercentage: p.discountPercentage,
+          category: p.category,
+          subcategory: p.subcategory,
+          brand: p.brand,
+          rating: p.rating,
+          reviewCount: p.reviewCount,
+          labels: p.labels,
+          unit: p.unit,
+          weightOrSize: p.weightOrSize
+        })),
         intentType: 'PRODUCT_SEARCH'
       });
     }
 
     if (intentType === 'PRODUCT_SEARCH') {
+      const categoryName = results[0].category || 'Products';
       return res.json({
         success: true,
-        message: `Sure. Here are some options available on SnapBuy:`,
-        items: results.map(p => ({ id: p._id, name: p.name, price: p.price, category: p.category })),
+        message: results.length === 1 
+          ? `Here's what I found for "${q}":`
+          : `Found ${results.length} products matching "${q}":`,
+        items: results.map(p => ({ 
+          id: p._id, 
+          name: p.name, 
+          price: p.price,
+          originalPrice: p.originalPrice,
+          discountPercentage: p.discountPercentage,
+          category: p.category,
+          subcategory: p.subcategory,
+          brand: p.brand,
+          rating: p.rating,
+          reviewCount: p.reviewCount,
+          labels: p.labels,
+          unit: p.unit,
+          weightOrSize: p.weightOrSize
+        })),
         intentType: 'PRODUCT_SEARCH'
       });
     }
